@@ -1,0 +1,12 @@
+# Trunk build configuration
+
+[build]
+# The index HTML file
+target = "../dist/index.html"
+# Output directory
+dist = "../dist"
+
+[[proxy]]
+# Proxy API requests to the backend
+rewrite = "/api"
+backend = "http://localhost:8080/api"

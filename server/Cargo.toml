@@ -1,0 +1,47 @@
+[package]
+name = "gamecode-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["http2", "macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-stream = "0.1"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# HTTP client for Ollama
+reqwest = { version = "0.11", features = ["stream", "json"] }
+futures = "0.3"
+async-stream = "0.3"
+
+# Security
+argon2 = "0.5"
+jsonwebtoken = "9"
+once_cell = "1.19"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Async traits
+async-trait = "0.1"
+
+# Time
+time = { version = "0.3", features = ["serde"] }
+
+# Environment
+dotenvy = "0.15"

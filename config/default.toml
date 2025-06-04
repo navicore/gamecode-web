@@ -1,0 +1,20 @@
+# GameCode Web Configuration
+
+[server]
+port = 8080
+static_dir = "dist"
+max_request_size = 10485760  # 10MB
+
+[auth]
+# Default password is "gamecode" - CHANGE THIS!
+# Generate new hash with: echo -n "your-password" | argon2 "$(openssl rand -base64 32)" -id -e
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$VE0Yc3hKakUwZWhqazhEMg$Rvzj1F8qRvLiDZ2bxiXPYdjUzZ3S4E8uFz2dMcLbKj0"
+jwt_secret = "change-me-in-production-use-long-random-string"
+session_duration_hours = 24
+
+[providers.ollama]
+enabled = true
+base_url = "http://localhost:11434"
+models = ["fortean"]
+default_model = "fortean"
+timeout_seconds = 300

@@ -1,0 +1,53 @@
+[package]
+name = "gamecode-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Leptos framework
+leptos = { version = "0.6", features = ["csr"] }
+leptos_router = { version = "0.6", features = ["csr"] }
+leptos_meta = { version = "0.6", features = ["csr"] }
+
+# Async/Future support
+futures = "0.3"
+gloo-net = { version = "0.5", features = ["http", "json"] }
+gloo-storage = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# WebAssembly
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "EventSource",
+    "MessageEvent",
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlTextAreaElement",
+    "Storage",
+    "console"
+] }
+
+# Utilities
+console_error_panic_hook = "0.1"
+thiserror = "1.0"
+regex = "1.10"
+once_cell = "1.19"
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+
+# Logging
+tracing = { workspace = true }
+tracing-wasm = "0.2"
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+panic = "abort"
