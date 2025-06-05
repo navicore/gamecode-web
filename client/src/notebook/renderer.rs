@@ -20,12 +20,12 @@ impl MermaidRenderer {
         // In a real implementation, this would call mermaid.js
         // For now, return a placeholder
         Ok(RenderedContent {
-            svg: Some(format!(
-                r#"<svg viewBox="0 0 200 100">
-                    <rect x="10" y="10" width="180" height="80" fill="#f0f0f0" stroke="#333"/>
-                    <text x="100" y="50" text-anchor="middle">Mermaid Diagram</text>
-                </svg>"#
-            )),
+            svg: Some(
+                "<svg viewBox=\"0 0 200 100\">\
+                    <rect x=\"10\" y=\"10\" width=\"180\" height=\"80\" fill=\"#f0f0f0\" stroke=\"#333\"/>\
+                    <text x=\"100\" y=\"50\" text-anchor=\"middle\">Mermaid Diagram</text>\
+                </svg>".to_string()
+            ),
             html: None,
             error: None,
         })
@@ -43,12 +43,12 @@ impl GraphvizRenderer {
     pub async fn render_async(&self, source: &str) -> Result<RenderedContent, String> {
         // Placeholder - real implementation would use graphviz-wasm
         Ok(RenderedContent {
-            svg: Some(format!(
-                r#"<svg viewBox="0 0 200 100">
-                    <rect x="10" y="10" width="180" height="80" fill="#e8f4f8" stroke="#333"/>
-                    <text x="100" y="50" text-anchor="middle">Graphviz Diagram</text>
-                </svg>"#
-            )),
+            svg: Some(
+                "<svg viewBox=\"0 0 200 100\">\
+                    <rect x=\"10\" y=\"10\" width=\"180\" height=\"80\" fill=\"#e8f4f8\" stroke=\"#333\"/>\
+                    <text x=\"100\" y=\"50\" text-anchor=\"middle\">Graphviz Diagram</text>\
+                </svg>".to_string()
+            ),
             html: None,
             error: None,
         })

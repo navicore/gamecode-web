@@ -6,7 +6,7 @@ mod api;
 mod components;
 mod notebook;
 
-use components::{auth::Auth, chat::Chat};
+use components::{auth::AuthForm, chat::Chat};
 
 #[component]
 fn App() -> impl IntoView {
@@ -74,7 +74,7 @@ fn HomePage() -> impl IntoView {
                     }.into_view()
                 } else {
                     view! {
-                        <Auth 
+                        <AuthForm 
                             on_auth=move |token_value| {
                                 set_token.set(token_value.clone());
                                 set_authenticated.set(true);

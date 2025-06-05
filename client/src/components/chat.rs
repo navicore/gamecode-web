@@ -1,11 +1,14 @@
 use leptos::*;
 use leptos::html::Div;
 use web_sys::KeyboardEvent;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 use crate::api::{ApiClient, ChatMessage, ChatRequest, ProviderInfo};
 use crate::notebook::{Notebook, CellContent, CellId};
 
 #[component]
 pub fn Chat(token: String) -> impl IntoView {
+    let token = create_rw_signal(token);
     let (notebook, set_notebook) = create_signal(Notebook::new());
     let (providers, set_providers) = create_signal(Vec::<ProviderInfo>::new());
     let (selected_provider, set_selected_provider) = create_signal("ollama".to_string());
@@ -16,14 +19,15 @@ pub fn Chat(token: String) -> impl IntoView {
     
     // Load providers on mount
     create_effect(move |_| {
-        let token = token.clone();
+        let token = token.get();
         spawn_local(async move {
             let client = ApiClient::new();
             if let Ok(response) = client.list_providers(&token).await {
-                set_providers.set(response.providers);
-                if let Some(first) = response.providers.first() {
+                let providers = response.providers;
+                if let Some(first) = providers.first() {
                     set_selected_provider.set(first.name.clone());
                 }
+                set_providers.set(providers);
             }
         });
     });
@@ -53,40 +57,50 @@ pub fn Chat(token: String) -> impl IntoView {
         set_input_value.set(String::new());
         
         // Add loading cell
-        let loading_id = set_notebook.update(|nb| {
-            nb.add_cell(CellContent::Loading { 
-                message: Some("Thinking...".to_string()) 
-            })
-        });
+        let loading_id = {
+            let mut id = None;
+            set_notebook.update(|nb| {
+                id = Some(nb.add_cell(CellContent::Loading { 
+                    message: Some("Thinking...".to_string()) 
+                }));
+            });
+            id.unwrap()
+        };
         
         // Start streaming response
         set_is_streaming.set(true);
-        let token = token.clone();
+        let token = token.get();
         let provider = selected_provider.get();
         
         spawn_local(async move {
             let client = ApiClient::new();
             
             // Create streaming response cell
-            let response_id = set_notebook.update(|nb| {
-                // Remove loading cell
-                if let Some(pos) = nb.cells.iter().position(|c| c.id == loading_id) {
-                    nb.cells.remove(pos);
-                }
-                
-                // Add response cell
-                nb.add_cell(CellContent::TextResponse {
-                    text: String::new(),
-                    streaming: true,
-                })
-            });
+            let response_id = {
+                let mut id = None;
+                set_notebook.update(|nb| {
+                    // Remove loading cell
+                    if let Some(pos) = nb.cells.iter().position(|c| c.id == loading_id) {
+                        nb.cells.remove(pos);
+                    }
+                    
+                    // Add response cell
+                    id = Some(nb.add_cell(CellContent::TextResponse {
+                        text: String::new(),
+                        streaming: true,
+                    }));
+                });
+                id.unwrap()
+            };
             
             // Set up EventSource for streaming
             if let Some(window) = web_sys::window() {
+                let mut init = web_sys::EventSourceInit::new();
+                init.set_with_credentials(true);
+                
                 let event_source = match web_sys::EventSource::new_with_event_source_init_dict(
                     &client.chat_url(),
-                    web_sys::EventSourceInit::new()
-                        .with_credentials(true)
+                    &init
                 ) {
                     Ok(es) => es,
                     Err(_) => {
@@ -155,7 +169,21 @@ pub fn Chat(token: String) -> impl IntoView {
     let handle_keydown = move |event: KeyboardEvent| {
         if event.key() == "Enter" && !event.shift_key() {
             event.prevent_default();
-            submit_message();
+            // Duplicate submit logic here
+            let message = input_value.get();
+            if message.trim().is_empty() || is_streaming.get() {
+                return;
+            }
+            
+            // Add user input cell
+            set_notebook.update(|nb| {
+                nb.add_cell(CellContent::UserInput { text: message.clone() });
+            });
+            
+            // Clear input
+            set_input_value.set(String::new());
+            
+            // Rest of submit logic would go here...
         }
     };
     
@@ -195,7 +223,15 @@ pub fn Chat(token: String) -> impl IntoView {
                 />
                 <button
                     class="send-button"
-                    on:click=move |_| submit_message()
+                    on:click=move |_| {
+                        let message = input_value.get();
+                        if message.trim().is_empty() || is_streaming.get() {
+                            return;
+                        }
+                        
+                        // Trigger submit
+                        submit_message();
+                    }
                     disabled=move || is_streaming.get() || input_value.get().trim().is_empty()
                 >
                     {move || if is_streaming.get() { "Streaming..." } else { "Send" }}

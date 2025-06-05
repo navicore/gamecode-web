@@ -37,7 +37,10 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 <div class="cell cell-code">
                     <div class="cell-header">
                         <span class="language-tag">{language.clone()}</span>
-                        <button class="copy-btn" on:click=move |_| copy_to_clipboard(&source)>
+                        <button class="copy-btn" on:click={
+                            let source = source.clone();
+                            move |_| copy_to_clipboard(&source)
+                        }>
                             "Copy"
                         </button>
                     </div>
@@ -72,7 +75,10 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                             <button on:click=move |_| set_show_source.update(|s| *s = !*s)>
                                 {move || if show_source.get() { "Hide Source" } else { "Show Source" }}
                             </button>
-                            <button on:click=move |_| copy_to_clipboard(&source)>
+                            <button on:click={
+                                let source = source.clone();
+                                move |_| copy_to_clipboard(&source)
+                            }>
                                 "Copy"
                             </button>
                         </div>
@@ -183,15 +189,13 @@ fn format_timestamp(dt: &chrono::DateTime<chrono::Utc>) -> String {
 
 fn copy_to_clipboard(text: &str) {
     if let Some(window) = web_sys::window() {
-        if let Some(navigator) = window.navigator() {
-            if let Some(clipboard) = navigator.clipboard() {
-                let text = text.to_string();
-                spawn_local(async move {
-                    let _ = wasm_bindgen_futures::JsFuture::from(
-                        clipboard.write_text(&text)
-                    ).await;
-                });
-            }
-        }
+        let navigator = window.navigator();
+        let clipboard = navigator.clipboard();
+        let text = text.to_string();
+        spawn_local(async move {
+            let _ = wasm_bindgen_futures::JsFuture::from(
+                clipboard.write_text(&text)
+            ).await;
+        });
     }
 }
