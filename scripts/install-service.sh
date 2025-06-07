@@ -85,8 +85,6 @@ cat > ~/Library/LaunchAgents/com.gamecode.web.plist << EOF
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/gamecode-web</string>
-        <string>--config</string>
-        <string>/usr/local/etc/gamecode-web/config.toml</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/usr/local/share/gamecode-web</string>
@@ -105,6 +103,8 @@ cat > ~/Library/LaunchAgents/com.gamecode.web.plist << EOF
     <dict>
         <key>RUST_LOG</key>
         <string>info</string>
+        <key>GAMECODE_CONFIG</key>
+        <string>/usr/local/etc/gamecode-web/config.toml</string>
     </dict>
 </dict>
 </plist>
