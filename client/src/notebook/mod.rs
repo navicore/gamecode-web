@@ -172,7 +172,12 @@ impl Notebook {
     pub fn update_streaming_response(&mut self, id: CellId, text: &str) {
         if let Some(cell) = self.get_cell_mut(id) {
             if let CellContent::TextResponse { text: content, streaming } = &mut cell.content {
-                content.push_str(text);
+                // Trim leading whitespace on first chunk
+                if content.is_empty() && !text.trim_start().is_empty() {
+                    content.push_str(text.trim_start());
+                } else {
+                    content.push_str(text);
+                }
                 *streaming = true;
             }
         }
@@ -180,7 +185,9 @@ impl Notebook {
     
     pub fn finalize_streaming_response(&mut self, id: CellId) {
         if let Some(cell) = self.get_cell_mut(id) {
-            if let CellContent::TextResponse { streaming, .. } = &mut cell.content {
+            if let CellContent::TextResponse { text: content, streaming } = &mut cell.content {
+                // Trim trailing whitespace when finalizing
+                *content = content.trim_end().to_string();
                 *streaming = false;
             }
             // Trigger diagram detection after streaming completes
