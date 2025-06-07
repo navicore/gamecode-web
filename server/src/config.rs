@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{env, fs};
+use toml;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -41,7 +42,7 @@ pub struct OllamaConfig {
 impl Config {
     pub fn load() -> Result<Self> {
         // Try environment variable first
-        if let Ok(config_path) = std::env::var("GAMECODE_CONFIG") {
+        if let Ok(config_path) = env::var("GAMECODE_CONFIG") {
             Self::from_file(&config_path)
         } else {
             // Default config path
@@ -50,7 +51,7 @@ impl Config {
     }
 
     fn from_file(path: &str) -> Result<Self> {
-        let content = std::fs::read_to_string(path)?;
+        let content = fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)?;
         Ok(config)
     }

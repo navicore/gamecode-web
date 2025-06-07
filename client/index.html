@@ -189,21 +189,10 @@
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
         }
     </style>
-<link rel="modulepreload" href="/gamecode-client-dc8727a77b8bd878.js" crossorigin="anonymous" integrity="sha384-Zbeifb5e3UBtGRw8t6DGfgoXuyt4u/nb3ulEw9SnOPnu+cBtDCaPtNmqOPZ6UDpL"><link rel="preload" href="/gamecode-client-dc8727a77b8bd878_bg.wasm" crossorigin="anonymous" integrity="sha384-X1d2ZicDpJJkvYBY9jwPbwjYda0cwlmeEzroljdMsluu/UZu/vxsZBUKz1Vv5Ppx" as="fetch" type="application/wasm"></head>
+</head>
 <body>
     <div id="app"></div>
     <!-- Trunk will inject the WASM app here -->
-    
-<script type="module">
-import init, * as bindings from '/gamecode-client-dc8727a77b8bd878.js';
-const wasm = await init({ module_or_path: '/gamecode-client-dc8727a77b8bd878_bg.wasm' });
-
-
-window.wasmBindings = bindings;
-
-
-dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
-
-</script>
+    <link data-trunk rel="rust" data-wasm-opt="z" />
 </body>
 </html>

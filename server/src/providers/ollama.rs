@@ -3,7 +3,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::time::Duration;
+use tracing;
 
 use super::{ChatChunk, ChatRequest, ChatStream, InferenceProvider};
 use crate::config::OllamaConfig;
@@ -57,20 +59,19 @@ impl OllamaProvider {
     }
     
     fn format_prompt(&self, request: &ChatRequest) -> String {
-        // For now, simple formatting. Can be enhanced based on model requirements
+        // Simple formatting that works with the Fortean model
         let mut prompt = String::new();
         
         for message in &request.messages {
             match message.role.as_str() {
-                "user" => prompt.push_str(&format!("Question: {}\n\n", message.content)),
-                "assistant" => prompt.push_str(&format!("Charles Fort: {}\n\n", message.content)),
+                "user" => prompt.push_str(&format!("{}\n\n", message.content)),
+                "assistant" => prompt.push_str(&format!("{}\n\n", message.content)),
                 _ => {}
             }
         }
         
-        // Add prefix for the response
-        prompt.push_str("Charles Fort: ");
-        prompt
+        // Don't add any prefix - let the model respond naturally
+        prompt.trim().to_string()
     }
 }
 
@@ -103,7 +104,10 @@ impl InferenceProvider for OllamaProvider {
             .unwrap_or(&self.config.default_model)
             .to_string();
         
+        tracing::info!("Ollama chat request for model: {}", model);
+        
         let prompt = self.format_prompt(&request);
+        tracing::debug!("Formatted prompt: {}", prompt);
         
         let ollama_request = OllamaGenerateRequest {
             model,
@@ -116,6 +120,8 @@ impl InferenceProvider for OllamaProvider {
         };
         
         let url = format!("{}/api/generate", self.config.base_url);
+        tracing::info!("Sending request to: {}", url);
+        
         let response = self.client
             .post(&url)
             .json(&ollama_request)
@@ -126,11 +132,15 @@ impl InferenceProvider for OllamaProvider {
             anyhow::bail!("Ollama request failed: {}", response.status());
         }
         
+        tracing::info!("Ollama response status: {}", response.status());
+        
         let stream = response
             .bytes_stream()
             .map(move |chunk| -> Result<ChatChunk> {
                 let chunk = chunk?;
                 let line = String::from_utf8_lossy(&chunk);
+                
+                tracing::debug!("Received chunk: {}", line);
                 
                 // Ollama sends newline-delimited JSON
                 for json_line in line.lines() {
@@ -138,11 +148,17 @@ impl InferenceProvider for OllamaProvider {
                         continue;
                     }
                     
-                    if let Ok(resp) = serde_json::from_str::<OllamaGenerateResponse>(json_line) {
-                        return Ok(ChatChunk {
-                            text: resp.response,
-                            done: resp.done,
-                        });
+                    match serde_json::from_str::<OllamaGenerateResponse>(json_line) {
+                        Ok(resp) => {
+                            tracing::debug!("Parsed response: text='{}', done={}", resp.response, resp.done);
+                            return Ok(ChatChunk {
+                                text: resp.response,
+                                done: resp.done,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to parse Ollama response: {}, line: {}", e, json_line);
+                        }
                     }
                 }
                 

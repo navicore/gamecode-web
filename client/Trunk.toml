@@ -2,7 +2,7 @@
 
 [build]
 # The index HTML file
-target = "../dist/index.html"
+target = "index.html"
 # Output directory
 dist = "../dist"
 

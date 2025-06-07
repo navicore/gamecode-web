@@ -32,7 +32,7 @@ pub struct AppState {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
-    let subscriber = FmtSubscriber::builder()
+    FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .init();
 

@@ -1,6 +1,8 @@
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
+use wasm_bindgen::JsCast;
+use web_sys::{window, Document};
 
 mod api;
 mod components;
@@ -13,7 +15,6 @@ fn App() -> impl IntoView {
     provide_meta_context();
     
     view! {
-        <Stylesheet id="leptos" href="/style.css"/>
         <Title text="GameCode Chat"/>
         <Meta name="viewport" content="width=device-width, initial-scale=1.0"/>
         
@@ -28,18 +29,22 @@ fn App() -> impl IntoView {
 
 #[component]
 fn HomePage() -> impl IntoView {
+    web_sys::console::log_1(&"HomePage component rendering...".into());
+    
     let (authenticated, set_authenticated) = create_signal(false);
     let (token, set_token) = create_signal(String::new());
     
     // Check for existing token in localStorage
     create_effect(move |_| {
-        if let Ok(Some(stored_token)) = window().local_storage() {
+        if let Some(window) = window() {
+            if let Ok(Some(stored_token)) = window.local_storage() {
             if let Ok(Some(t)) = stored_token.get_item("auth_token") {
                 if !t.is_empty() {
                     set_token.set(t);
                     set_authenticated.set(true);
                 }
             }
+        }
         }
     });
     
@@ -54,8 +59,10 @@ fn HomePage() -> impl IntoView {
                             on:click=move |_| {
                                 set_authenticated.set(false);
                                 set_token.set(String::new());
-                                if let Ok(Some(storage)) = window().local_storage() {
-                                    let _ = storage.remove_item("auth_token");
+                                if let Some(window) = window() {
+                                    if let Ok(Some(storage)) = window.local_storage() {
+                                        let _ = storage.remove_item("auth_token");
+                                    }
                                 }
                             }
                         >
@@ -79,8 +86,10 @@ fn HomePage() -> impl IntoView {
                                 set_token.set(token_value.clone());
                                 set_authenticated.set(true);
                                 // Store token
-                                if let Ok(Some(storage)) = window().local_storage() {
-                                    let _ = storage.set_item("auth_token", &token_value);
+                                if let Some(window) = window() {
+                                    if let Ok(Some(storage)) = window.local_storage() {
+                                        let _ = storage.set_item("auth_token", &token_value);
+                                    }
                                 }
                             }
                         />
@@ -107,5 +116,15 @@ fn main() {
     // Initialize tracing for WASM
     tracing_wasm::set_as_global_default();
     
-    mount_to_body(|| view! { <App/> })
+    // Mount the app to the #app div
+    if let Some(window) = web_sys::window() {
+        if let Some(document) = window.document() {
+            if let Some(app_div) = document.get_element_by_id("app") {
+                leptos::mount_to(
+                    app_div.unchecked_into(),
+                    || view! { <App/> },
+                );
+            }
+        }
+    }
 }

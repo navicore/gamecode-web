@@ -1,11 +1,18 @@
 use leptos::*;
 use serde::{Deserialize, Serialize};
 use gloo_storage::{LocalStorage, Storage};
+use chrono::Utc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthToken {
     pub token: String,
     pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AuthResponse {
+    pub token: String,
+    pub expires_in: u64,
 }
 
 #[component]
@@ -98,10 +105,18 @@ async fn authenticate(password: &str) -> Result<AuthToken, String> {
         .map_err(|e| format!("Failed to send request: {}", e))?;
 
     if response.ok() {
-        response
-            .json::<AuthToken>()
+        let auth_response: AuthResponse = response
+            .json()
             .await
-            .map_err(|e| format!("Failed to parse response: {}", e))
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        
+        // Calculate expires_at from expires_in
+        let expires_at = chrono::Utc::now().timestamp() + auth_response.expires_in as i64;
+        
+        Ok(AuthToken {
+            token: auth_response.token,
+            expires_at,
+        })
     } else {
         match response.status() {
             401 => Err("Invalid password".to_string()),

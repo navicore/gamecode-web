@@ -2,22 +2,20 @@ use anyhow::Result;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
     async_trait,
-    extract::{FromRequestParts, TypedHeader},
-    headers::{authorization::Bearer, Authorization},
+    extract::FromRequestParts,
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
+use axum_extra::TypedHeader;
+use headers::{authorization::Bearer, Authorization};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 
 use crate::config::AuthConfig;
-
-static JWT_SECRET: Lazy<String> = Lazy::new(|| {
-    std::env::var("JWT_SECRET").unwrap_or_else(|_| "change-me-in-production".to_string())
-});
+use crate::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -42,22 +40,23 @@ pub struct AuthUser {
 }
 
 #[async_trait]
-impl<S> FromRequestParts<S> for AuthUser
-where
-    S: Send + Sync,
+impl FromRequestParts<Arc<AppState>> for AuthUser
 {
     type Rejection = AuthError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {
         // Extract the token from the authorization header
-        let TypedHeader(Authorization(bearer)) = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, &())
+        let TypedHeader(Authorization(bearer)) = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
             .await
             .map_err(|_| AuthError::MissingToken)?;
+
+        // Get JWT secret from config
+        let jwt_secret = &state.config.auth.jwt_secret;
 
         // Decode and validate the token
         let token_data = decode::<Claims>(
             bearer.token(),
-            &DecodingKey::from_secret(JWT_SECRET.as_bytes()),
+            &DecodingKey::from_secret(jwt_secret.as_bytes()),
             &Validation::default(),
         )
         .map_err(|_| AuthError::InvalidToken)?;
@@ -69,7 +68,8 @@ where
 }
 
 pub fn verify_password(password: &str, password_hash: &str) -> Result<()> {
-    let parsed_hash = PasswordHash::new(password_hash)?;
+    let parsed_hash = PasswordHash::new(password_hash)
+        .map_err(|e| anyhow::anyhow!("Invalid password hash: {}", e))?;
     Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
         .map_err(|_| anyhow::anyhow!("Invalid password"))

@@ -58,9 +58,16 @@ async fn authenticate(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    // Debug log
+    tracing::info!("Auth attempt with password length: {}", req.password.len());
+    tracing::debug!("Expected hash: {}", &state.config.auth.password_hash);
+    
     // Verify password
     verify_password(&req.password, &state.config.auth.password_hash)
-        .map_err(|_| AppError::Unauthorized)?;
+        .map_err(|e| {
+            tracing::warn!("Password verification failed: {:?}", e);
+            AppError::Unauthorized
+        })?;
     
     // Generate token
     let token = generate_token(&state.config.auth)?;
@@ -119,12 +126,16 @@ async fn chat(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatRequestBody>,
 ) -> Result<Sse<UnboundedReceiverStream<Result<Event, Infallible>>>, AppError> {
+    tracing::info!("Chat endpoint hit with provider: {}", req.provider);
+    
     let chat_request = ChatRequest {
-        messages: req.messages,
+        messages: req.messages.clone(),
         model: req.model,
         temperature: req.temperature,
         max_tokens: req.max_tokens,
     };
+    
+    tracing::info!("Messages: {:?}", req.messages);
     
     let mut stream = state.providers
         .chat(&req.provider, chat_request)

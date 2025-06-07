@@ -93,22 +93,46 @@ pub fn Chat(token: String) -> impl IntoView {
                 id.unwrap()
             };
             
-            // Set up EventSource for streaming
+            // Send request and handle streaming response
+            let request = ChatRequest {
+                provider: provider.clone(),
+                messages: vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: message,
+                }],
+                model: None,
+                temperature: None,
+                max_tokens: None,
+            };
+            
+            // Use web-sys to make the request and handle streaming
             if let Some(window) = web_sys::window() {
-                let mut init = web_sys::EventSourceInit::new();
-                init.set_with_credentials(true);
+                use wasm_bindgen::JsCast;
+                use wasm_bindgen_futures::JsFuture;
+                use web_sys::{Request, RequestInit, Response, Headers};
                 
-                let event_source = match web_sys::EventSource::new_with_event_source_init_dict(
-                    &client.chat_url(),
-                    &init
-                ) {
-                    Ok(es) => es,
+                // Create request
+                let opts = RequestInit::new();
+                opts.set_method("POST");
+                
+                // Set headers
+                let headers = Headers::new().unwrap();
+                headers.append("Content-Type", "application/json").unwrap();
+                headers.append("Authorization", &format!("Bearer {}", token)).unwrap();
+                opts.set_headers(&headers);
+                
+                // Set body
+                let body = serde_json::to_string(&request).unwrap();
+                opts.set_body(&wasm_bindgen::JsValue::from_str(&body));
+                
+                let request = match Request::new_with_str_and_init(&client.chat_url(), &opts) {
+                    Ok(req) => req,
                     Err(_) => {
                         set_notebook.update(|nb| {
                             nb.cells.push(crate::notebook::Cell {
                                 id: CellId(nb.cells.len()),
                                 content: CellContent::Error {
-                                    message: "Failed to connect to server".to_string(),
+                                    message: "Failed to create request".to_string(),
                                     details: None,
                                 },
                                 timestamp: chrono::Utc::now(),
@@ -120,48 +144,108 @@ pub fn Chat(token: String) -> impl IntoView {
                     }
                 };
                 
-                // Handle messages
-                let on_message = {
-                    let set_notebook = set_notebook.clone();
-                    Closure::<dyn Fn(_)>::new(move |event: web_sys::MessageEvent| {
-                        if let Ok(text) = event.data().dyn_into::<js_sys::JsString>() {
-                            if let Ok(chunk) = serde_json::from_str::<crate::api::ChatChunk>(&text.as_string().unwrap()) {
-                                set_notebook.update(|nb| {
-                                    nb.update_streaming_response(response_id, &chunk.text);
-                                    if chunk.done {
-                                        nb.finalize_streaming_response(response_id);
-                                    }
+                // Fetch and handle response
+                let promise = window.fetch_with_request(&request);
+                match JsFuture::from(promise).await {
+                    Ok(resp_value) => {
+                        let resp: Response = resp_value.dyn_into().unwrap();
+                        
+                        if !resp.ok() {
+                            set_notebook.update(|nb| {
+                                nb.cells.push(crate::notebook::Cell {
+                                    id: CellId(nb.cells.len()),
+                                    content: CellContent::Error {
+                                        message: format!("Server error: {}", resp.status()),
+                                        details: None,
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                    metadata: Default::default(),
                                 });
-                                
-                                if chunk.done {
-                                    set_is_streaming.set(false);
+                            });
+                            set_is_streaming.set(false);
+                            return;
+                        }
+                        
+                        // Get the body as a stream
+                        if let Some(body) = resp.body() {
+                            use wasm_streams::ReadableStream;
+                            use futures::StreamExt;
+                            
+                            let stream = ReadableStream::from_raw(body);
+                            let mut reader = stream.into_stream();
+                            
+                            let mut buffer = String::new();
+                            
+                            while let Some(chunk) = reader.next().await {
+                                match chunk {
+                                    Ok(data) => {
+                                        let array = js_sys::Uint8Array::new(&data);
+                                        let mut bytes = vec![0u8; array.length() as usize];
+                                        array.copy_to(&mut bytes);
+                                        
+                                        if let Ok(text) = String::from_utf8(bytes) {
+                                            buffer.push_str(&text);
+                                            
+                                            // Process complete SSE events
+                                            while let Some(event_end) = buffer.find("\n\n") {
+                                                let event = buffer[..event_end].to_string();
+                                                buffer.drain(..event_end + 2);
+                                                
+                                                // Parse SSE event
+                                                if let Some(data_line) = event.lines().find(|line| line.starts_with("data: ")) {
+                                                    let data = &data_line[6..]; // Skip "data: "
+                                                    
+                                                    if let Ok(chunk) = serde_json::from_str::<crate::api::ChatChunk>(data) {
+                                                        set_notebook.update(|nb| {
+                                                            nb.update_streaming_response(response_id, &chunk.text);
+                                                            if chunk.done {
+                                                                nb.finalize_streaming_response(response_id);
+                                                            }
+                                                        });
+                                                        
+                                                        if chunk.done {
+                                                            set_is_streaming.set(false);
+                                                            return;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        set_notebook.update(|nb| {
+                                            nb.cells.push(crate::notebook::Cell {
+                                                id: CellId(nb.cells.len()),
+                                                content: CellContent::Error {
+                                                    message: "Stream read error".to_string(),
+                                                    details: None,
+                                                },
+                                                timestamp: chrono::Utc::now(),
+                                                metadata: Default::default(),
+                                            });
+                                        });
+                                        set_is_streaming.set(false);
+                                        break;
+                                    }
                                 }
                             }
                         }
-                    })
-                };
-                
-                event_source.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-                on_message.forget();
-                
-                // Send the actual request
-                let request = ChatRequest {
-                    provider: provider.clone(),
-                    messages: vec![ChatMessage {
-                        role: "user".to_string(),
-                        content: message,
-                    }],
-                    model: None,
-                    temperature: None,
-                    max_tokens: None,
-                };
-                
-                let _ = gloo_net::http::Request::post(&client.chat_url())
-                    .header("Authorization", &format!("Bearer {}", token))
-                    .json(&request)
-                    .unwrap()
-                    .send()
-                    .await;
+                    }
+                    Err(_) => {
+                        set_notebook.update(|nb| {
+                            nb.cells.push(crate::notebook::Cell {
+                                id: CellId(nb.cells.len()),
+                                content: CellContent::Error {
+                                    message: "Network error".to_string(),
+                                    details: None,
+                                },
+                                timestamp: chrono::Utc::now(),
+                                metadata: Default::default(),
+                            });
+                        });
+                        set_is_streaming.set(false);
+                    }
+                }
             }
         });
     };

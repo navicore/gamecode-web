@@ -36,8 +36,14 @@ web-sys = { version = "0.3", features = [
     "Storage",
     "Navigator",
     "Clipboard",
-    "console"
+    "console",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Headers",
+    "ReadableStream"
 ] }
+wasm-streams = "0.4"
 
 # Utilities
 console_error_panic_hook = "0.1"
