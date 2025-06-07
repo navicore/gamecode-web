@@ -43,10 +43,13 @@ pub fn Chat(token: String) -> impl IntoView {
     });
     
     let submit_message = move || {
+        web_sys::console::log_1(&"submit_message called".into());
         let message = input_value.get();
         if message.trim().is_empty() || is_streaming.get() {
+            web_sys::console::log_1(&"Message empty or already streaming".into());
             return;
         }
+        web_sys::console::log_1(&format!("Submitting message: {}", message).into());
         
         // Add user input cell
         set_notebook.update(|nb| {
@@ -67,31 +70,32 @@ pub fn Chat(token: String) -> impl IntoView {
             id.unwrap()
         };
         
+        // Create streaming response cell BEFORE async block
+        let response_id = {
+            let mut id = None;
+            set_notebook.update(|nb| {
+                // Remove loading cell
+                if let Some(pos) = nb.cells.iter().position(|c| c.id == loading_id) {
+                    nb.cells.remove(pos);
+                }
+                
+                // Add response cell
+                id = Some(nb.add_cell(CellContent::TextResponse {
+                    text: String::new(),
+                    streaming: true,
+                }));
+            });
+            id.unwrap()
+        };
+        
         // Start streaming response
         set_is_streaming.set(true);
         let token = token.get();
         let provider = selected_provider.get();
         
         spawn_local(async move {
+            web_sys::console::log_1(&"Inside spawn_local".into());
             let client = ApiClient::new();
-            
-            // Create streaming response cell
-            let response_id = {
-                let mut id = None;
-                set_notebook.update(|nb| {
-                    // Remove loading cell
-                    if let Some(pos) = nb.cells.iter().position(|c| c.id == loading_id) {
-                        nb.cells.remove(pos);
-                    }
-                    
-                    // Add response cell
-                    id = Some(nb.add_cell(CellContent::TextResponse {
-                        text: String::new(),
-                        streaming: true,
-                    }));
-                });
-                id.unwrap()
-            };
             
             // Send request and handle streaming response
             let request = ChatRequest {
@@ -106,6 +110,7 @@ pub fn Chat(token: String) -> impl IntoView {
             };
             
             // Use web-sys to make the request and handle streaming
+            web_sys::console::log_1(&"Starting streaming request".into());
             if let Some(window) = web_sys::window() {
                 use wasm_bindgen::JsCast;
                 use wasm_bindgen_futures::JsFuture;
@@ -145,6 +150,7 @@ pub fn Chat(token: String) -> impl IntoView {
                 };
                 
                 // Fetch and handle response
+                web_sys::console::log_1(&format!("Fetching from: {}", client.chat_url()).into());
                 let promise = window.fetch_with_request(&request);
                 match JsFuture::from(promise).await {
                     Ok(resp_value) => {
@@ -253,21 +259,7 @@ pub fn Chat(token: String) -> impl IntoView {
     let handle_keydown = move |event: KeyboardEvent| {
         if event.key() == "Enter" && !event.shift_key() {
             event.prevent_default();
-            // Duplicate submit logic here
-            let message = input_value.get();
-            if message.trim().is_empty() || is_streaming.get() {
-                return;
-            }
-            
-            // Add user input cell
-            set_notebook.update(|nb| {
-                nb.add_cell(CellContent::UserInput { text: message.clone() });
-            });
-            
-            // Clear input
-            set_input_value.set(String::new());
-            
-            // Rest of submit logic would go here...
+            submit_message();
         }
     };
     
