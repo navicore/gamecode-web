@@ -32,14 +32,25 @@ pub fn Chat(token: String) -> impl IntoView {
         });
     });
     
-    // Auto-scroll to bottom when new cells are added
+    // Helper function to scroll to bottom
+    let scroll_to_bottom = move || {
+        if let Some(element) = notebook_ref.get() {
+            // Use web_sys to ensure proper scrolling
+            if let Some(window) = web_sys::window() {
+                let el = element.clone();
+                let closure = Closure::once(move || {
+                    el.set_scroll_top(el.scroll_height());
+                });
+                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+                closure.forget();
+            }
+        }
+    };
+    
+    // Auto-scroll to bottom when notebook changes
     create_effect(move |_| {
         notebook.get(); // Subscribe to changes
-        if let Some(element) = notebook_ref.get() {
-            request_animation_frame(move || {
-                element.set_scroll_top(element.scroll_height());
-            });
-        }
+        scroll_to_bottom();
     });
     
     let submit_message = move || {
@@ -59,6 +70,9 @@ pub fn Chat(token: String) -> impl IntoView {
         // Clear input
         set_input_value.set(String::new());
         
+        // Scroll after adding user message
+        scroll_to_bottom();
+        
         // Add loading cell
         let loading_id = {
             let mut id = None;
@@ -69,6 +83,9 @@ pub fn Chat(token: String) -> impl IntoView {
             });
             id.unwrap()
         };
+        
+        // Scroll after adding loading cell
+        scroll_to_bottom();
         
         // Create streaming response cell BEFORE async block
         let response_id = {
@@ -87,6 +104,9 @@ pub fn Chat(token: String) -> impl IntoView {
             });
             id.unwrap()
         };
+        
+        // Scroll after adding response cell
+        scroll_to_bottom();
         
         // Start streaming response
         set_is_streaming.set(true);
@@ -208,6 +228,9 @@ pub fn Chat(token: String) -> impl IntoView {
                                                                 nb.finalize_streaming_response(response_id);
                                                             }
                                                         });
+                                                        
+                                                        // Scroll during streaming
+                                                        scroll_to_bottom();
                                                         
                                                         if chunk.done {
                                                             set_is_streaming.set(false);

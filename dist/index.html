@@ -11,18 +11,25 @@
             box-sizing: border-box;
         }
         
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: #1a1a1a;
             color: #e0e0e0;
-            height: 100vh;
             overflow: hidden;
         }
         
         #app {
-            height: 100%;
+            height: 100vh;
+            max-height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
         
         /* Auth styles */
@@ -95,12 +102,14 @@
             display: flex;
             flex-direction: column;
             height: 100%;
+            overflow: hidden;
         }
         
         .chat-header {
             padding: 1rem;
             background: #2d2d2d;
             border-bottom: 1px solid #444;
+            flex-shrink: 0;
         }
         
         .provider-select {
@@ -115,6 +124,8 @@
             flex: 1;
             overflow-y: auto;
             padding: 1rem;
+            min-height: 0; /* Important for flexbox scrolling */
+            max-height: calc(100vh - 250px); /* Account for header and input area */
         }
         
         .cell {
@@ -143,6 +154,10 @@
             padding: 1rem;
             background: #2d2d2d;
             border-top: 1px solid #444;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
         }
         
         .chat-input {
@@ -189,14 +204,14 @@
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
         }
     </style>
-<link rel="modulepreload" href="/gamecode-client-247d140e6d67ce8a.js" crossorigin="anonymous" integrity="sha384-lFVOxM6Jwn81qcgmgGIVekAZe1FbU0M/kcfzAku9htimBf/fXX7GEeF73lOa9pTW"><link rel="preload" href="/gamecode-client-247d140e6d67ce8a_bg.wasm" crossorigin="anonymous" integrity="sha384-OkEqgGjXoIne6cNFpHSGXWVkPJlUnR0LIS4Y3CPH3vHRcgGaK1O53HtnoxrLK+GE" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/gamecode-client-36875e18c3993160.js" crossorigin="anonymous" integrity="sha384-zEA+U/U8FkqSDC43ZEXp85XrTVvMpsbjj2Vq+rDYYgkE2TcpGUrHmmLk7rPoeHcK"><link rel="preload" href="/gamecode-client-36875e18c3993160_bg.wasm" crossorigin="anonymous" integrity="sha384-JC5npfuQoe0RKoY+yqxzu33TLv0/TU/1+Vs+LcaC9S8qKh2IqG6Fvtz/IV04kYtJ" as="fetch" type="application/wasm"></head>
 <body>
     <div id="app"></div>
     <!-- Trunk will inject the WASM app here -->
     
 <script type="module">
-import init, * as bindings from '/gamecode-client-247d140e6d67ce8a.js';
-const wasm = await init({ module_or_path: '/gamecode-client-247d140e6d67ce8a_bg.wasm' });
+import init, * as bindings from '/gamecode-client-36875e18c3993160.js';
+const wasm = await init({ module_or_path: '/gamecode-client-36875e18c3993160_bg.wasm' });
 
 
 window.wasmBindings = bindings;
