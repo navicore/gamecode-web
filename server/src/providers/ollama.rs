@@ -59,18 +59,22 @@ impl OllamaProvider {
     }
     
     fn format_prompt(&self, request: &ChatRequest) -> String {
-        // Simple formatting that works with the Fortean model
+        // Format prompt to match Python script's style
         let mut prompt = String::new();
         
         for message in &request.messages {
             match message.role.as_str() {
-                "user" => prompt.push_str(&format!("{}\n\n", message.content)),
-                "assistant" => prompt.push_str(&format!("{}\n\n", message.content)),
+                "user" => {
+                    // Match the Python script format exactly
+                    prompt.push_str(&format!("Question: {}\n\nCharles Fort:", message.content));
+                }
+                "assistant" => {
+                    // Skip assistant messages for now to avoid confusion
+                }
                 _ => {}
             }
         }
         
-        // Don't add any prefix - let the model respond naturally
         prompt.trim().to_string()
     }
 }
@@ -134,6 +138,12 @@ impl InferenceProvider for OllamaProvider {
         
         tracing::info!("Ollama response status: {}", response.status());
         
+        use std::sync::{Arc, Mutex};
+        
+        // Track if we've seen certain stop patterns
+        let response_buffer = Arc::new(Mutex::new(String::new()));
+        let stop_streaming = Arc::new(Mutex::new(false));
+        
         let stream = response
             .bytes_stream()
             .map(move |chunk| -> Result<ChatChunk> {
@@ -151,6 +161,32 @@ impl InferenceProvider for OllamaProvider {
                     match serde_json::from_str::<OllamaGenerateResponse>(json_line) {
                         Ok(resp) => {
                             tracing::debug!("Parsed response: text='{}', done={}", resp.response, resp.done);
+                            
+                            // Check if we should stop
+                            let mut should_stop = stop_streaming.lock().unwrap();
+                            if *should_stop {
+                                return Ok(ChatChunk {
+                                    text: String::new(),
+                                    done: true,
+                                });
+                            }
+                            
+                            // Accumulate response
+                            let mut buffer = response_buffer.lock().unwrap();
+                            buffer.push_str(&resp.response);
+                            
+                            // Check for stop patterns
+                            if buffer.contains("\n---\n") || 
+                               buffer.contains("\nQuestion:") || 
+                               buffer.contains("\n\nQuestion:") ||
+                               buffer.contains("Charles Fort:") && buffer.len() > 100 {
+                                *should_stop = true;
+                                return Ok(ChatChunk {
+                                    text: resp.response,
+                                    done: true,
+                                });
+                            }
+                            
                             return Ok(ChatChunk {
                                 text: resp.response,
                                 done: resp.done,
