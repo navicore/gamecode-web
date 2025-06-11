@@ -12,6 +12,7 @@ pub fn Chat(token: String) -> impl IntoView {
     let (notebook, set_notebook) = create_signal(Notebook::new());
     let (providers, set_providers) = create_signal(Vec::<ProviderInfo>::new());
     let (selected_provider, set_selected_provider) = create_signal("ollama".to_string());
+    let (selected_model, set_selected_model) = create_signal(String::new());
     let (input_value, set_input_value) = create_signal(String::new());
     let (is_streaming, set_is_streaming) = create_signal(false);
     
@@ -26,10 +27,25 @@ pub fn Chat(token: String) -> impl IntoView {
                 let providers = response.providers;
                 if let Some(first) = providers.first() {
                     set_selected_provider.set(first.name.clone());
+                    if let Some(first_model) = first.models.first() {
+                        set_selected_model.set(first_model.clone());
+                    }
                 }
                 set_providers.set(providers);
             }
         });
+    });
+    
+    // Update available models when provider changes
+    create_effect(move |_| {
+        let provider = selected_provider.get();
+        let all_providers = providers.get();
+        
+        if let Some(provider_info) = all_providers.iter().find(|p| p.name == provider) {
+            if let Some(first_model) = provider_info.models.first() {
+                set_selected_model.set(first_model.clone());
+            }
+        }
     });
     
     // Helper function to scroll to bottom
@@ -112,6 +128,7 @@ pub fn Chat(token: String) -> impl IntoView {
         set_is_streaming.set(true);
         let token = token.get();
         let provider = selected_provider.get();
+        let model = selected_model.get();
         
         spawn_local(async move {
             web_sys::console::log_1(&"Inside spawn_local".into());
@@ -124,7 +141,7 @@ pub fn Chat(token: String) -> impl IntoView {
                     role: "user".to_string(),
                     content: message,
                 }],
-                model: None,
+                model: Some(model),
                 temperature: None,
                 max_tokens: None,
             };
@@ -289,17 +306,46 @@ pub fn Chat(token: String) -> impl IntoView {
     view! {
         <div class="chat-container">
             <div class="chat-header">
-                <select 
-                    class="provider-select"
-                    on:change=move |ev| set_selected_provider.set(event_target_value(&ev))
-                    prop:value=move || selected_provider.get()
-                >
-                    {move || providers.get().into_iter().map(|p| {
-                        view! {
-                            <option value=p.name.clone()>{p.name}</option>
-                        }
-                    }).collect_view()}
-                </select>
+                <div class="model-selectors">
+                    <div class="selector-group">
+                        <label>Provider:</label>
+                        <select 
+                            class="provider-select"
+                            on:change=move |ev| set_selected_provider.set(event_target_value(&ev))
+                            prop:value=move || selected_provider.get()
+                        >
+                            {move || providers.get().into_iter().map(|p| {
+                                view! {
+                                    <option value=p.name.clone()>{p.name}</option>
+                                }
+                            }).collect_view()}
+                        </select>
+                    </div>
+                    
+                    <div class="selector-group">
+                        <label>Model:</label>
+                        <select 
+                            class="model-select"
+                            on:change=move |ev| set_selected_model.set(event_target_value(&ev))
+                            prop:value=move || selected_model.get()
+                        >
+                            {move || {
+                                let current_provider = selected_provider.get();
+                                let all_providers = providers.get();
+                                
+                                if let Some(provider) = all_providers.iter().find(|p| p.name == current_provider) {
+                                    provider.models.clone().into_iter().map(|model| {
+                                        view! {
+                                            <option value=model.clone()>{model}</option>
+                                        }
+                                    }).collect_view()
+                                } else {
+                                    vec![].into_view()
+                                }
+                            }}
+                        </select>
+                    </div>
+                </div>
             </div>
             
             <div class="notebook-container" node_ref=notebook_ref>
