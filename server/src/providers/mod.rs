@@ -19,6 +19,7 @@ pub struct ChatMessage {
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub model: Option<String>,
+    pub system_prompt: Option<String>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<usize>,
 }

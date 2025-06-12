@@ -112,12 +112,48 @@
             flex-shrink: 0;
         }
         
-        .provider-select {
+        .model-selectors {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+        
+        .selector-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .selector-group label {
+            color: #999;
+            font-size: 0.9rem;
+        }
+        
+        .provider-select, .model-select, .prompt-select {
             padding: 0.5rem;
             background: #1a1a1a;
             border: 1px solid #444;
             border-radius: 4px;
             color: #e0e0e0;
+            min-width: 150px;
+        }
+        
+        .custom-prompt-container {
+            padding: 0.5rem 1rem;
+            background: #2d2d2d;
+            border-bottom: 1px solid #444;
+        }
+        
+        .custom-prompt-input {
+            width: 100%;
+            padding: 0.5rem;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #e0e0e0;
+            resize: vertical;
+            font-family: inherit;
+            font-size: 0.9rem;
         }
         
         .notebook-container {
@@ -204,14 +240,14 @@
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
         }
     </style>
-<link rel="modulepreload" href="/gamecode-client-36875e18c3993160.js" crossorigin="anonymous" integrity="sha384-zEA+U/U8FkqSDC43ZEXp85XrTVvMpsbjj2Vq+rDYYgkE2TcpGUrHmmLk7rPoeHcK"><link rel="preload" href="/gamecode-client-36875e18c3993160_bg.wasm" crossorigin="anonymous" integrity="sha384-JC5npfuQoe0RKoY+yqxzu33TLv0/TU/1+Vs+LcaC9S8qKh2IqG6Fvtz/IV04kYtJ" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/gamecode-client-651eebf236819d7.js" crossorigin="anonymous" integrity="sha384-6Dq0+gd9OgdzpkI0MSgvRgv/uhN2ZyQDPXCszq7PcwwPXMMgBJPHfkQuSoxRvV9A"><link rel="preload" href="/gamecode-client-651eebf236819d7_bg.wasm" crossorigin="anonymous" integrity="sha384-Mtvz27Ki04Mi0XKNYWrSnjyvFqbIx9ynatEU1kFhsZ9sPTkw2MAHZnRoIo9nbHwl" as="fetch" type="application/wasm"></head>
 <body>
     <div id="app"></div>
     <!-- Trunk will inject the WASM app here -->
     
 <script type="module">
-import init, * as bindings from '/gamecode-client-36875e18c3993160.js';
-const wasm = await init({ module_or_path: '/gamecode-client-36875e18c3993160_bg.wasm' });
+import init, * as bindings from '/gamecode-client-651eebf236819d7.js';
+const wasm = await init({ module_or_path: '/gamecode-client-651eebf236819d7_bg.wasm' });
 
 
 window.wasmBindings = bindings;

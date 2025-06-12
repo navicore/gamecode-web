@@ -51,9 +51,99 @@ install-deps:
 	cargo install trunk
 	cargo install cargo-watch
 
+# Complete installation (build, install files, restart service)
+install: build
+	@echo "🚀 Installing GameCode Web..."
+	@echo "This will require your sudo password to install system files."
+	@echo ""
+	
+	# Install binary
+	@echo "📦 Installing server binary..."
+	sudo cp target/release/gamecode-server /usr/local/bin/gamecode-web
+	
+	# Install static files
+	@echo "📄 Installing web files..."
+	sudo rm -rf /usr/local/share/gamecode-web
+	sudo mkdir -p /usr/local/share/gamecode-web
+	sudo cp -r dist/* /usr/local/share/gamecode-web/
+	
+	# Install config files
+	@echo "⚙️  Installing configuration..."
+	sudo mkdir -p /usr/local/etc/gamecode-web
+	@if [ ! -f /usr/local/etc/gamecode-web/config.toml ]; then \
+		sudo cp config/default.toml /usr/local/etc/gamecode-web/config.toml; \
+		echo "   Created new config.toml"; \
+	else \
+		echo "   Keeping existing config.toml"; \
+	fi
+	
+	# Install prompts config
+	@echo "💬 Installing prompts configuration..."
+	@if [ ! -f /usr/local/etc/gamecode-web/prompts.toml ]; then \
+		sudo cp config/prompts.toml /usr/local/etc/gamecode-web/prompts.toml; \
+		echo "   Created new prompts.toml"; \
+	else \
+		echo "   Keeping existing prompts.toml (edit it to add custom prompts)"; \
+	fi
+	
+	# Update config to use installed paths
+	@echo "🔧 Updating configuration paths..."
+	sudo sed -i '' 's|static_dir = "dist"|static_dir = "/usr/local/share/gamecode-web"|' /usr/local/etc/gamecode-web/config.toml
+	
+	# Log directory will use /tmp instead for simplicity
+	
+	# Install or update service
+	@echo "🎯 Installing service..."
+	@if [ -f ~/Library/LaunchAgents/com.gamecode.web.plist ]; then \
+		echo "   Stopping existing service..."; \
+		launchctl stop com.gamecode.web 2>/dev/null || true; \
+		launchctl unload ~/Library/LaunchAgents/com.gamecode.web.plist 2>/dev/null || true; \
+	fi
+	
+	# Create service plist
+	@./scripts/create-service-plist.sh
+	
+	# Load and start service
+	@echo "🚀 Starting service..."
+	launchctl load ~/Library/LaunchAgents/com.gamecode.web.plist
+	launchctl start com.gamecode.web
+	
+	# Wait a moment
+	@sleep 2
+	
+	# Check status
+	@echo ""
+	@echo "✅ Installation complete!"
+	@echo ""
+	@if launchctl list | grep -q "com.gamecode.web"; then \
+		echo "🟢 Service is running"; \
+		echo "🌐 Local access: http://localhost:8080"; \
+		echo ""; \
+		echo "📝 To edit AI personas: sudo vim /usr/local/etc/gamecode-web/prompts.toml"; \
+		echo "🔄 To restart after changes: make restart"; \
+		echo "📊 To view logs: make logs"; \
+	else \
+		echo "❌ Service failed to start!"; \
+		echo "Check logs: tail -f /tmp/gamecode-*.log"; \
+		exit 1; \
+	fi
+
+# Quick restart service
+restart:
+	@echo "🔄 Restarting GameCode Web service..."
+	launchctl stop com.gamecode.web || true
+	@sleep 1
+	launchctl start com.gamecode.web
+	@sleep 1
+	@if launchctl list | grep -q "com.gamecode.web"; then \
+		echo "✅ Service restarted successfully"; \
+	else \
+		echo "❌ Service failed to start!"; \
+	fi
+
 # Service management
-install-service: build
-	./scripts/install-service.sh
+install-service: install
+	@echo "Note: Use 'make install' instead"
 
 uninstall-service:
 	./scripts/uninstall-service.sh
@@ -68,10 +158,12 @@ service-status:
 	@echo "Service Status:"
 	@launchctl list | grep gamecode || echo "Service not found"
 	@echo "\nRecent Logs:"
-	@tail -n 20 /usr/local/var/log/gamecode-web/output.log 2>/dev/null || echo "No logs found"
+	@tail -n 20 /tmp/gamecode-output.log 2>/dev/null || echo "No logs found"
 
 service-logs:
-	tail -f /usr/local/var/log/gamecode-web/*.log
+	tail -f /tmp/gamecode-*.log
+
+logs: service-logs
 
 # Cloudflare Tunnel
 setup-tunnel:

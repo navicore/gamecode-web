@@ -15,6 +15,5 @@ session_duration_hours = 24
 [providers.ollama]
 enabled = true
 base_url = "http://localhost:11434"
-models = ["fortean-gamecode", "fortean-web", "fortean-final"]
-default_model = "fortean-gamecode"
+default_model = "fortean-advanced:latest"
 timeout_seconds = 60  # Reduced from 300

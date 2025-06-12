@@ -39,6 +39,7 @@ pub struct ChatRequest {
     pub provider: String,
     pub messages: Vec<ChatMessage>,
     pub model: Option<String>,
+    pub system_prompt: Option<String>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<usize>,
 }
@@ -113,4 +114,37 @@ impl ApiClient {
     pub fn chat_url(&self) -> String {
         format!("{}/chat", self.base_url)
     }
+    
+    pub async fn list_prompts(&self, token: &str) -> Result<PromptsResponse, ApiError> {
+        let response = Request::get(&format!("{}/prompts", self.base_url))
+            .header("Authorization", &format!("Bearer {}", token))
+            .send()
+            .await
+            .map_err(|e| ApiError::Network(e.to_string()))?;
+        
+        if response.status() == 401 {
+            return Err(ApiError::Unauthorized);
+        }
+        
+        if !response.ok() {
+            return Err(ApiError::Server(format!("Status: {}", response.status())));
+        }
+        
+        response
+            .json::<PromptsResponse>()
+            .await
+            .map_err(|e| ApiError::Network(e.to_string()))
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PromptsResponse {
+    pub prompts: Vec<SystemPrompt>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct SystemPrompt {
+    pub name: String,
+    pub prompt: String,
+    pub suggested_models: Vec<String>,
 }
