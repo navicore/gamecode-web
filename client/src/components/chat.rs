@@ -3,7 +3,7 @@ use leptos::html::Div;
 use web_sys::KeyboardEvent;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
-use crate::api::{ApiClient, ChatMessage, ChatRequest, ProviderInfo};
+use crate::api::{ApiClient, ChatMessage, ChatRequest, ProviderInfo, SystemPrompt};
 use crate::notebook::{Notebook, CellContent, CellId};
 
 #[component]
@@ -13,16 +13,21 @@ pub fn Chat(token: String) -> impl IntoView {
     let (providers, set_providers) = create_signal(Vec::<ProviderInfo>::new());
     let (selected_provider, set_selected_provider) = create_signal("ollama".to_string());
     let (selected_model, set_selected_model) = create_signal(String::new());
+    let (system_prompts, set_system_prompts) = create_signal(Vec::<SystemPrompt>::new());
+    let (selected_prompt_name, set_selected_prompt_name) = create_signal("General Assistant".to_string());
+    let (custom_prompt, set_custom_prompt) = create_signal(String::new());
     let (input_value, set_input_value) = create_signal(String::new());
     let (is_streaming, set_is_streaming) = create_signal(false);
     
     let notebook_ref = create_node_ref::<Div>();
     
-    // Load providers on mount
+    // Load providers and prompts on mount
     create_effect(move |_| {
         let token = token.get();
         spawn_local(async move {
             let client = ApiClient::new();
+            
+            // Load providers
             if let Ok(response) = client.list_providers(&token).await {
                 let providers = response.providers;
                 if let Some(first) = providers.first() {
@@ -32,6 +37,11 @@ pub fn Chat(token: String) -> impl IntoView {
                     }
                 }
                 set_providers.set(providers);
+            }
+            
+            // Load prompts
+            if let Ok(response) = client.list_prompts(&token).await {
+                set_system_prompts.set(response.prompts);
             }
         });
     });
@@ -45,6 +55,21 @@ pub fn Chat(token: String) -> impl IntoView {
             if let Some(first_model) = provider_info.models.first() {
                 set_selected_model.set(first_model.clone());
             }
+        }
+    });
+    
+    // Update system prompt when model changes
+    create_effect(move |_| {
+        let model = selected_model.get();
+        let prompts = system_prompts.get();
+        
+        // Find a prompt that suggests this model
+        let matching_prompt = prompts.iter()
+            .find(|p| p.suggested_models.iter().any(|m| m.contains(&model)))
+            .or_else(|| prompts.iter().find(|p| p.name == "General Assistant"));
+            
+        if let Some(prompt) = matching_prompt {
+            set_selected_prompt_name.set(prompt.name.clone());
         }
     });
     
@@ -129,6 +154,19 @@ pub fn Chat(token: String) -> impl IntoView {
         let token = token.get();
         let provider = selected_provider.get();
         let model = selected_model.get();
+        let prompt_name = selected_prompt_name.get();
+        let custom = custom_prompt.get();
+        let prompts = system_prompts.get();
+        
+        // Get the actual system prompt text
+        let system_prompt = if prompt_name == "Custom" {
+            Some(custom)
+        } else {
+            prompts
+                .iter()
+                .find(|p| p.name == prompt_name)
+                .map(|p| p.prompt.clone())
+        };
         
         spawn_local(async move {
             web_sys::console::log_1(&"Inside spawn_local".into());
@@ -142,6 +180,7 @@ pub fn Chat(token: String) -> impl IntoView {
                     content: message,
                 }],
                 model: Some(model),
+                system_prompt,
                 temperature: None,
                 max_tokens: None,
             };
@@ -340,12 +379,45 @@ pub fn Chat(token: String) -> impl IntoView {
                                         }
                                     }).collect_view()
                                 } else {
-                                    vec![].into_view()
+                                    leptos::View::default()
                                 }
                             }}
                         </select>
                     </div>
+                    
+                    <div class="selector-group">
+                        <label>Persona:</label>
+                        <select 
+                            class="prompt-select"
+                            on:change=move |ev| set_selected_prompt_name.set(event_target_value(&ev))
+                            prop:value=move || selected_prompt_name.get()
+                        >
+                            {move || system_prompts.get().into_iter().map(|prompt| {
+                                view! {
+                                    <option value=prompt.name.clone()>{prompt.name}</option>
+                                }
+                            }).collect_view()}
+                        </select>
+                    </div>
                 </div>
+                
+                {move || {
+                    if selected_prompt_name.get() == "Custom" {
+                        view! {
+                            <div class="custom-prompt-container">
+                                <textarea
+                                    class="custom-prompt-input"
+                                    placeholder="Enter your custom system prompt..."
+                                    prop:value=move || custom_prompt.get()
+                                    on:input=move |ev| set_custom_prompt.set(event_target_value(&ev))
+                                    rows="3"
+                                />
+                            </div>
+                        }.into_view()
+                    } else {
+                        view! { <div></div> }.into_view()
+                    }
+                }}
             </div>
             
             <div class="notebook-container" node_ref=notebook_ref>

@@ -34,7 +34,8 @@ pub struct ProvidersConfig {
 pub struct OllamaConfig {
     pub enabled: bool,
     pub base_url: String,
-    pub models: Vec<String>,
+    #[serde(default)]
+    pub models: Vec<String>,  // Deprecated - models are now fetched dynamically
     pub default_model: String,
     pub timeout_seconds: u64,
 }

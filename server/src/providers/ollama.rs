@@ -16,12 +16,18 @@ pub struct OllamaProvider {
 }
 
 #[derive(Serialize)]
-struct OllamaGenerateRequest {
+struct OllamaChatRequest {
     model: String,
-    prompt: String,
+    messages: Vec<OllamaChatMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<OllamaOptions>,
+}
+
+#[derive(Serialize)]
+struct OllamaChatMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Serialize)]
@@ -33,9 +39,15 @@ struct OllamaOptions {
 }
 
 #[derive(Deserialize)]
-struct OllamaGenerateResponse {
-    response: String,
+struct OllamaChatResponse {
+    message: Option<OllamaChatResponseMessage>,
     done: bool,
+}
+
+#[derive(Deserialize)]
+struct OllamaChatResponseMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Deserialize)]
@@ -58,25 +70,6 @@ impl OllamaProvider {
         Self { config, client }
     }
     
-    fn format_prompt(&self, request: &ChatRequest) -> String {
-        // Format prompt to match Python script's style
-        let mut prompt = String::new();
-        
-        for message in &request.messages {
-            match message.role.as_str() {
-                "user" => {
-                    // Match the Python script format exactly
-                    prompt.push_str(&format!("Question: {}\n\nCharles Fort:", message.content));
-                }
-                "assistant" => {
-                    // Skip assistant messages for now to avoid confusion
-                }
-                _ => {}
-            }
-        }
-        
-        prompt.trim().to_string()
-    }
 }
 
 #[async_trait]
@@ -110,12 +103,28 @@ impl InferenceProvider for OllamaProvider {
         
         tracing::info!("Ollama chat request for model: {}", model);
         
-        let prompt = self.format_prompt(&request);
-        tracing::debug!("Formatted prompt: {}", prompt);
+        // Build messages array with system prompt if provided
+        let mut messages = Vec::new();
         
-        let ollama_request = OllamaGenerateRequest {
+        // Add system message if provided
+        if let Some(system) = &request.system_prompt {
+            messages.push(OllamaChatMessage {
+                role: "system".to_string(),
+                content: system.clone(),
+            });
+        }
+        
+        // Add user messages
+        for msg in &request.messages {
+            messages.push(OllamaChatMessage {
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+            });
+        }
+        
+        let ollama_request = OllamaChatRequest {
             model,
-            prompt,
+            messages,
             stream: true,
             options: Some(OllamaOptions {
                 temperature: request.temperature,
@@ -123,7 +132,7 @@ impl InferenceProvider for OllamaProvider {
             }),
         };
         
-        let url = format!("{}/api/generate", self.config.base_url);
+        let url = format!("{}/api/chat", self.config.base_url);
         tracing::info!("Sending request to: {}", url);
         
         let response = self.client
@@ -158,9 +167,14 @@ impl InferenceProvider for OllamaProvider {
                         continue;
                     }
                     
-                    match serde_json::from_str::<OllamaGenerateResponse>(json_line) {
+                    match serde_json::from_str::<OllamaChatResponse>(json_line) {
                         Ok(resp) => {
-                            tracing::debug!("Parsed response: text='{}', done={}", resp.response, resp.done);
+                            // Extract content from message
+                            let content = resp.message
+                                .map(|m| m.content)
+                                .unwrap_or_default();
+                            
+                            tracing::debug!("Parsed response: text='{}', done={}", content, resp.done);
                             
                             // Check if we should stop
                             let mut should_stop = stop_streaming.lock().unwrap();
@@ -173,22 +187,23 @@ impl InferenceProvider for OllamaProvider {
                             
                             // Accumulate response
                             let mut buffer = response_buffer.lock().unwrap();
-                            buffer.push_str(&resp.response);
+                            buffer.push_str(&content);
                             
-                            // Check for stop patterns
+                            // Check for generic stop patterns
                             if buffer.contains("\n---\n") || 
-                               buffer.contains("\nQuestion:") || 
-                               buffer.contains("\n\nQuestion:") ||
-                               buffer.contains("Charles Fort:") && buffer.len() > 100 {
+                               buffer.contains("\nUser:") || 
+                               buffer.contains("\n\nUser:") ||
+                               buffer.contains("\nHuman:") || 
+                               buffer.contains("\n\nHuman:") {
                                 *should_stop = true;
                                 return Ok(ChatChunk {
-                                    text: resp.response,
+                                    text: content,
                                     done: true,
                                 });
                             }
                             
                             return Ok(ChatChunk {
-                                text: resp.response,
+                                text: content,
                                 done: resp.done,
                             });
                         }
