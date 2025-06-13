@@ -15,5 +15,5 @@ session_duration_hours = 24
 [providers.ollama]
 enabled = true
 base_url = "http://localhost:11434"
-default_model = "fortean-advanced:latest"
-timeout_seconds = 60  # Reduced from 300
+default_model = "llama3.2:latest"
+timeout_seconds = 60

@@ -1,0 +1,11 @@
+[server]
+bind_address = "0.0.0.0"
+port = 8080
+static_dir = "dist"
+
+[auth]
+password_hash = ""
+
+[providers.ollama]
+enabled = true
+url = "http://localhost:11434"

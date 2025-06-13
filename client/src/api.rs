@@ -44,7 +44,7 @@ pub struct ChatRequest {
     pub max_tokens: Option<usize>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,

@@ -7,6 +7,8 @@ use web_sys::{window, Document};
 mod api;
 mod components;
 mod notebook;
+mod storage;
+mod simple_storage;
 
 use components::{auth::{AuthForm, get_stored_token, is_token_valid, clear_auth_token}, chat::Chat};
 
