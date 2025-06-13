@@ -184,7 +184,28 @@ fn Markdown(text: String) -> impl IntoView {
 }
 
 fn format_timestamp(dt: &chrono::DateTime<chrono::Utc>) -> String {
-    dt.format("%H:%M:%S").to_string()
+    use chrono::{Local, TimeZone};
+    
+    // Convert UTC to local time
+    let local_dt = Local.from_utc_datetime(&dt.naive_utc());
+    
+    // Format based on how recent the timestamp is
+    let now = Local::now();
+    let duration = now.signed_duration_since(local_dt);
+    
+    if duration.num_days() == 0 {
+        // Today - just show time
+        local_dt.format("%H:%M:%S").to_string()
+    } else if duration.num_days() == 1 {
+        // Yesterday
+        local_dt.format("Yesterday %H:%M").to_string()
+    } else if duration.num_days() < 7 {
+        // This week - show day name
+        local_dt.format("%A %H:%M").to_string()
+    } else {
+        // Older - show full date
+        local_dt.format("%b %d, %Y %H:%M").to_string()
+    }
 }
 
 fn copy_to_clipboard(text: &str) {

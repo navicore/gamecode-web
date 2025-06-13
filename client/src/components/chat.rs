@@ -8,7 +8,7 @@ use crate::notebook::{Notebook, CellContent, CellId};
 use crate::components::context_manager::{ContextManager, ContextDisplay};
 use crate::storage::{StoredConversation, ConversationMetadata};
 use crate::simple_storage::SimpleStorage;
-use chrono::Utc;
+use chrono::{Utc, Local, TimeZone};
 use uuid::Uuid;
 
 #[component]
@@ -786,7 +786,7 @@ where
                                                             >
                                                                 <div class="conversation-title">{conv_clone.title}</div>
                                                                 <div class="conversation-preview">{conv_clone.preview}</div>
-                                                                <div class="conversation-date">{conv_clone.modified_at.format("%m/%d %H:%M").to_string()}</div>
+                                                                <div class="conversation-date">{format_conversation_date(&conv_clone.modified_at)}</div>
                                                             </button>
                                                             <button
                                                                 class="conversation-delete-btn"
@@ -983,5 +983,31 @@ where
                 </button>
             </div>
         </div>
+    }
+}
+
+fn format_conversation_date(dt: &chrono::DateTime<chrono::Utc>) -> String {
+    // Convert UTC to local time
+    let local_dt = Local.from_utc_datetime(&dt.naive_utc());
+    
+    // Format based on how recent the timestamp is
+    let now = Local::now();
+    let duration = now.signed_duration_since(local_dt);
+    
+    if duration.num_days() == 0 {
+        // Today - just show time
+        local_dt.format("Today %H:%M").to_string()
+    } else if duration.num_days() == 1 {
+        // Yesterday
+        local_dt.format("Yesterday %H:%M").to_string()
+    } else if duration.num_days() < 7 {
+        // This week - show day name
+        local_dt.format("%a %H:%M").to_string()
+    } else if duration.num_days() < 365 {
+        // This year - show month and day
+        local_dt.format("%b %d").to_string()
+    } else {
+        // Older - show full date
+        local_dt.format("%m/%d/%y").to_string()
     }
 }
