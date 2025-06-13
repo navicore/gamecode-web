@@ -5,6 +5,11 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use crate::api::{ApiClient, ChatMessage, ChatRequest, ProviderInfo, SystemPrompt};
 use crate::notebook::{Notebook, CellContent, CellId};
+use crate::components::context_manager::{ContextManager, ContextDisplay};
+use crate::storage::{StoredConversation, ConversationMetadata};
+use crate::simple_storage::SimpleStorage;
+use chrono::Utc;
+use uuid::Uuid;
 
 #[component]
 pub fn Chat<F>(
@@ -52,10 +57,106 @@ where
     
     let notebook_ref = create_node_ref::<Div>();
     
+    // Create or restore conversation ID
+    let (conversation_id, set_conversation_id) = create_signal(
+        storage.get_item("current_conversation_id")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| {
+                let new_id = Uuid::new_v4().to_string();
+                let _ = storage.set_item("current_conversation_id", &new_id);
+                new_id
+            })
+    );
+    
+    // Create context manager
+    let context_manager = ContextManager::new();
+    let simple_storage = SimpleStorage::new();
+    let (created_at, set_created_at) = create_signal(Utc::now());
+    let (conversations, set_conversations) = create_signal(Vec::<crate::storage::ConversationRef>::new());
+    let (show_conversation_dropdown, set_show_conversation_dropdown) = create_signal(false);
+    
     // Handle auth errors
     create_effect(move |_| {
         if auth_error_triggered.get() {
             on_auth_error();
+        }
+    });
+    
+    // Setup click outside handler for dropdown
+    create_effect(move |_| {
+        if show_conversation_dropdown.get() {
+            // Add a small delay to prevent immediate closing when opening
+            if let Some(window) = web_sys::window() {
+                let closure = Closure::once(move || {
+                    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                        let handle_click = Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+                            if let Some(target) = e.target() {
+                                if let Ok(element) = target.dyn_into::<web_sys::Element>() {
+                                    // Check if click is outside the dropdown area
+                                    if element.closest(".dropdown-wrapper").unwrap_or(None).is_none() {
+                                        set_show_conversation_dropdown.set(false);
+                                    }
+                                }
+                            }
+                        }) as Box<dyn FnMut(_)>);
+                        
+                        let _ = document.add_event_listener_with_callback(
+                            "click",
+                            handle_click.as_ref().unchecked_ref()
+                        );
+                        handle_click.forget();
+                    }
+                });
+                
+                let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    closure.as_ref().unchecked_ref(),
+                    10
+                );
+                closure.forget();
+            }
+        }
+    });
+    
+    // Load existing conversation on mount
+    create_effect({
+        let conversation_id = conversation_id.clone();
+        let context_manager = context_manager.clone();
+        let simple_storage = simple_storage.clone();
+        move |_| {
+            let current_id = conversation_id.get();
+            web_sys::console::log_1(&"Loading conversation from localStorage...".into());
+            
+            // Try to load existing conversation
+            if let Ok(Some(stored)) = simple_storage.load_conversation(&current_id) {
+                web_sys::console::log_1(&format!("Loaded conversation {} with {} cells", 
+                    current_id, stored.notebook.cells.len()).into());
+                    
+                // Restore the context state
+                context_manager.restore_state(stored.context_state);
+                
+                // Update notebook with stored cells
+                set_notebook.update(|nb| {
+                    *nb = stored.notebook;
+                });
+                
+                // Restore created time
+                set_created_at.set(stored.metadata.created_at);
+                
+                web_sys::console::log_1(&"Conversation restored successfully".into());
+            } else {
+                web_sys::console::log_1(&format!("No existing conversation found for ID: {}", current_id).into());
+            }
+        }
+    });
+    
+    // Load conversations list
+    create_effect({
+        let simple_storage = simple_storage.clone();
+        move |_| {
+            if let Ok(conv_list) = simple_storage.list_conversations(20) {
+                set_conversations.set(conv_list);
+            }
         }
     });
     
@@ -215,8 +316,81 @@ where
         scroll_to_bottom();
     });
     
+    // Save conversation when notebook or context changes
+    create_effect({
+        let conversation_id = conversation_id.clone();
+        let context_manager = context_manager.clone();
+        let selected_provider = selected_provider.clone();
+        let selected_model = selected_model.clone();
+        let simple_storage = simple_storage.clone();
+        move |_| {
+            let notebook_value = notebook.get();
+            
+            // Also subscribe to context changes
+            let _ = context_manager.get_total_tokens();
+            
+            // Skip if no content
+            if notebook_value.cells.is_empty() {
+                return;
+            }
+            
+            web_sys::console::log_1(&format!("Save effect - preparing to save {} cells", notebook_value.cells.len()).into());
+            
+            // Generate title from first user message
+            let title = notebook_value.cells.iter()
+                .find_map(|cell| match &cell.content {
+                    crate::notebook::CellContent::UserInput { text } => Some(text.clone()),
+                    _ => None
+                })
+                .map(|text| {
+                    // Take first 40 chars or up to first newline
+                    let title_text = text.lines().next().unwrap_or(&text);
+                    let truncated = title_text.chars().take(40).collect::<String>();
+                    if title_text.len() > 40 {
+                        truncated + "..."
+                    } else {
+                        truncated
+                    }
+                })
+                .unwrap_or_else(|| "New Conversation".to_string());
+            
+            // Create metadata
+            let metadata = ConversationMetadata {
+                created_at: created_at.get(),
+                modified_at: Utc::now(),
+                title,
+                model: selected_model.get(),
+                provider: selected_provider.get(),
+            };
+            
+            // Create stored conversation
+            let stored = StoredConversation {
+                id: conversation_id.get(),
+                notebook: notebook_value,
+                context_state: context_manager.to_state(),
+                metadata,
+            };
+            
+            web_sys::console::log_1(&format!("Saving conversation {}", conversation_id.get()).into());
+            
+            // Save synchronously
+            match simple_storage.save_conversation(&stored) {
+                Ok(_) => {
+                    web_sys::console::log_1(&format!("✅ Conversation {} saved successfully", stored.id).into());
+                    // Refresh conversation list
+                    if let Ok(conv_list) = simple_storage.list_conversations(20) {
+                        set_conversations.set(conv_list);
+                    }
+                },
+                Err(e) => web_sys::console::error_1(&format!("❌ Failed to save conversation: {:?}", e).into()),
+            }
+        }
+    });
+    
     // Handle message submission when triggered
-    create_effect(move |_| {
+    create_effect({
+        let context_manager = context_manager.clone();
+        move |_| {
             if !should_submit.get() {
                 return;
             }
@@ -236,6 +410,13 @@ where
         set_notebook.update(|nb| {
             nb.add_cell(CellContent::UserInput { text: message.clone() });
         });
+        
+        // Add message to context
+        let user_msg = ChatMessage {
+            role: "user".to_string(),
+            content: message.clone(),
+        };
+        context_manager.add_message(user_msg);
         
         // Clear input
         set_input_value.set(String::new());
@@ -297,17 +478,18 @@ where
                 .map(|p| p.prompt.clone())
         };
         
+        let context_manager_clone = context_manager.clone();
         spawn_local(async move {
             web_sys::console::log_1(&"Inside spawn_local".into());
             let client = ApiClient::new();
             
+            // Get full context for request
+            let context_messages = context_manager_clone.get_context_for_request();
+            
             // Send request and handle streaming response
             let request = ChatRequest {
                 provider: provider.clone(),
-                messages: vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: message.clone(),
-                }],
+                messages: context_messages,
                 model: Some(model),
                 system_prompt,
                 temperature: None,
@@ -413,6 +595,7 @@ where
                             let mut reader = stream.into_stream();
                             
                             let mut buffer = String::new();
+                            let mut complete_response = String::new();
                             
                             while let Some(chunk) = reader.next().await {
                                 match chunk {
@@ -434,6 +617,8 @@ where
                                                     let data = &data_line[6..]; // Skip "data: "
                                                     
                                                     if let Ok(chunk) = serde_json::from_str::<crate::api::ChatChunk>(data) {
+                                                        complete_response.push_str(&chunk.text);
+                                                        
                                                         set_notebook.update(|nb| {
                                                             nb.update_streaming_response(response_id, &chunk.text);
                                                             if chunk.done {
@@ -445,6 +630,13 @@ where
                                                         scroll_to_bottom();
                                                         
                                                         if chunk.done {
+                                                            // Add complete response to context
+                                                            let assistant_msg = ChatMessage {
+                                                                role: "assistant".to_string(),
+                                                                content: complete_response.clone(),
+                                                            };
+                                                            context_manager_clone.add_message(assistant_msg);
+                                                            
                                                             set_is_streaming.set(false);
                                                             return;
                                                         }
@@ -489,6 +681,7 @@ where
                 }
             }
         });
+        }
     });
     
     let handle_keydown = move |event: KeyboardEvent| {
@@ -498,84 +691,225 @@ where
         }
     };
     
+    let context_manager_for_display = context_manager.clone();
+    let context_manager_for_clear = context_manager.clone();
+    
     view! {
         <div class="chat-container">
             <div class="chat-header">
-                {move || if providers_loaded.get() {
-                    view! {
-                        <div class="model-selectors">
-                            <div class="selector-group">
-                                <label>Provider:</label>
-                                <select 
-                                    class="provider-select"
-                                    on:change=move |ev| {
-                                        set_provider_manually_changed.set(true);
-                                        set_selected_provider.set(event_target_value(&ev));
-                                    }
-                                >
-                                    {move || {
-                                        let current = selected_provider.get();
-                                        providers.get().into_iter().map(|p| {
-                                            let is_selected = p.name == current;
-                                            view! {
-                                                <option value=p.name.clone() selected=is_selected>{p.name}</option>
-                                            }
-                                        }).collect_view()
-                                    }}
-                                </select>
-                            </div>
+                <div class="selectors-container">
+                    <div class="selector-column">
+                        <label class="selector-label">Conversations</label>
+                        <div class="dropdown-wrapper">
+                            <button 
+                                class="selector-dropdown conversation-button"
+                                on:click=move |e| {
+                                    e.stop_propagation();
+                                    set_show_conversation_dropdown.update(|v| *v = !*v);
+                                }
+                            >
+                                {move || {
+                                    let current_id = conversation_id.get();
+                                    conversations.get().iter()
+                                        .find(|c| c.id == current_id)
+                                        .map(|c| c.title.clone())
+                                        .unwrap_or_else(|| "New Conversation".to_string())
+                                }}
+                                <span class="dropdown-arrow">{"▼"}</span>
+                            </button>
                             
-                            <div class="selector-group">
-                                <label>Model:</label>
-                                <select 
-                                    class="model-select"
-                                    on:change=move |ev| set_selected_model.set(event_target_value(&ev))
-                                >
-                                    {move || {
-                                        let current_provider = selected_provider.get();
-                                        let current_model = selected_model.get();
-                                        let all_providers = providers.get();
+                            {move || if show_conversation_dropdown.get() {
+                                let context_manager_clone = context_manager.clone();
+                                let conversation_id = conversation_id.clone();
+                                let simple_storage = simple_storage.clone();
+                                let context_manager = context_manager.clone();
+                                view! {
+                                    <div class="conversation-dropdown-menu">
+                                        <button 
+                                            class="new-conversation-btn"
+                                            on:click=move |_| {
+                                                // Create new conversation
+                                                let new_id = Uuid::new_v4().to_string();
+                                                if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
+                                                    let _ = storage.set_item("current_conversation_id", &new_id);
+                                                }
+                                                set_conversation_id.set(new_id);
+                                                set_notebook.update(|nb| {
+                                                    nb.cells.clear();
+                                                    nb.cursor_position = crate::notebook::CellId(0);
+                                                });
+                                                context_manager_clone.clear_context();
+                                                set_created_at.set(Utc::now());
+                                                set_show_conversation_dropdown.set(false);
+                                            }
+                                        >
+                                            "+ New Conversation"
+                                        </button>
                                         
-                                        if let Some(provider) = all_providers.iter().find(|p| p.name == current_provider) {
-                                            provider.models.clone().into_iter().map(|model| {
-                                                let is_selected = model == current_model;
+                                        <div class="conversation-list">
+                                            {move || conversations.get().into_iter().map({
+                                                let conversation_id = conversation_id.clone();
+                                                let simple_storage = simple_storage.clone();
+                                                let context_manager = context_manager.clone();
+                                                move |conv| {
+                                                    let is_current = conv.id == conversation_id.get();
+                                                    let conv_id = conv.id.clone();
+                                                    let conv_clone = conv.clone();
+                                                    view! {
+                                                        <div class="conversation-item" class:current=is_current>
+                                                            <button
+                                                                class="conversation-select-btn"
+                                                                on:click={
+                                                                    let conv_id = conv_id.clone();
+                                                                    let simple_storage = simple_storage.clone();
+                                                                    let context_manager = context_manager.clone();
+                                                                    move |_| {
+                                                                        if !is_current {
+                                                                            // Switch to this conversation
+                                                                            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
+                                                                                let _ = storage.set_item("current_conversation_id", &conv_id);
+                                                                            }
+                                                                            set_conversation_id.set(conv_id.clone());
+                                                                            set_show_conversation_dropdown.set(false);
+                                                                            
+                                                                            // Load the conversation
+                                                                            if let Ok(Some(stored)) = simple_storage.load_conversation(&conv_id) {
+                                                                                context_manager.restore_state(stored.context_state);
+                                                                                set_notebook.update(|nb| {
+                                                                                    *nb = stored.notebook;
+                                                                                });
+                                                                                set_created_at.set(stored.metadata.created_at);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            >
+                                                                <div class="conversation-title">{conv_clone.title}</div>
+                                                                <div class="conversation-preview">{conv_clone.preview}</div>
+                                                                <div class="conversation-date">{conv_clone.modified_at.format("%m/%d %H:%M").to_string()}</div>
+                                                            </button>
+                                                            <button
+                                                                class="conversation-delete-btn"
+                                                                on:click={
+                                                                    let conv_id = conv.id.clone();
+                                                                    let simple_storage = simple_storage.clone();
+                                                                    let conversation_id_clone = conversation_id.clone();
+                                                                    let context_manager_clone = context_manager.clone();
+                                                                    move |e| {
+                                                                        e.stop_propagation();
+                                                                        // Delete the conversation
+                                                                        let _ = simple_storage.delete_conversation(&conv_id);
+                                                                        // Refresh list
+                                                                        if let Ok(conv_list) = simple_storage.list_conversations(20) {
+                                                                            set_conversations.set(conv_list);
+                                                                        }
+                                                                        // If deleting current conversation, create new one
+                                                                        if conv_id == conversation_id_clone.get() {
+                                                                            let new_id = Uuid::new_v4().to_string();
+                                                                            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
+                                                                                let _ = storage.set_item("current_conversation_id", &new_id);
+                                                                            }
+                                                                            set_conversation_id.set(new_id);
+                                                                            set_notebook.update(|nb| {
+                                                                                nb.cells.clear();
+                                                                                nb.cursor_position = crate::notebook::CellId(0);
+                                                                            });
+                                                                            context_manager_clone.clear_context();
+                                                                            set_created_at.set(Utc::now());
+                                                                        }
+                                                                    }
+                                                                }
+                                                                title="Delete conversation"
+                                                            >
+                                                                "×"
+                                                            </button>
+                                                        </div>
+                                                    }
+                                                }
+                                            }).collect_view()}
+                                        </div>
+                                    </div>
+                                }.into_view()
+                            } else {
+                                view! { <div></div> }.into_view()
+                            }}
+                        </div>
+                    </div>
+                    
+                    {move || if providers_loaded.get() {
+                        view! {
+                            <>
+                                <div class="selector-column">
+                                    <label class="selector-label">Provider</label>
+                                    <select 
+                                        class="selector-dropdown"
+                                        on:change=move |ev| {
+                                            set_provider_manually_changed.set(true);
+                                            set_selected_provider.set(event_target_value(&ev));
+                                        }
+                                    >
+                                        {move || {
+                                            let current = selected_provider.get();
+                                            providers.get().into_iter().map(|p| {
+                                                let is_selected = p.name == current;
                                                 view! {
-                                                    <option value=model.clone() selected=is_selected>{model}</option>
+                                                    <option value=p.name.clone() selected=is_selected>{p.name}</option>
                                                 }
                                             }).collect_view()
-                                        } else {
-                                            leptos::View::default()
-                                        }
-                                    }}
-                                </select>
-                            </div>
-                            
-                            <div class="selector-group">
-                                <label>Persona:</label>
-                                <select 
-                                    class="prompt-select"
-                                    on:change=move |ev| set_selected_prompt_name.set(event_target_value(&ev))
-                                >
-                                    {move || {
-                                        let current = selected_prompt_name.get();
-                                        system_prompts.get().into_iter().map(|prompt| {
-                                            let is_selected = prompt.name == current;
-                                            view! {
-                                                <option value=prompt.name.clone() selected=is_selected>{prompt.name}</option>
+                                        }}
+                                    </select>
+                                </div>
+                                
+                                <div class="selector-column">
+                                    <label class="selector-label">Model</label>
+                                    <select 
+                                        class="selector-dropdown"
+                                        on:change=move |ev| set_selected_model.set(event_target_value(&ev))
+                                    >
+                                        {move || {
+                                            let current_provider = selected_provider.get();
+                                            let current_model = selected_model.get();
+                                            let all_providers = providers.get();
+                                            
+                                            if let Some(provider) = all_providers.iter().find(|p| p.name == current_provider) {
+                                                provider.models.clone().into_iter().map(|model| {
+                                                    let is_selected = model == current_model;
+                                                    view! {
+                                                        <option value=model.clone() selected=is_selected>{model}</option>
+                                                    }
+                                                }).collect_view()
+                                            } else {
+                                                leptos::View::default()
                                             }
-                                        }).collect_view()
-                                    }}
-                                </select>
-                            </div>
-                        </div>
-                    }.into_view()
-                } else {
-                    view! {
-                        <div class="model-selectors">
-                            <div class="loading">Loading providers...</div>
-                        </div>
-                    }.into_view()
-                }}
+                                        }}
+                                    </select>
+                                </div>
+                                
+                                <div class="selector-column">
+                                    <label class="selector-label">Persona</label>
+                                    <select 
+                                        class="selector-dropdown"
+                                        on:change=move |ev| set_selected_prompt_name.set(event_target_value(&ev))
+                                    >
+                                        {move || {
+                                            let current = selected_prompt_name.get();
+                                            system_prompts.get().into_iter().map(|prompt| {
+                                                let is_selected = prompt.name == current;
+                                                view! {
+                                                    <option value=prompt.name.clone() selected=is_selected>{prompt.name}</option>
+                                                }
+                                            }).collect_view()
+                                        }}
+                                    </select>
+                                </div>
+                            </>
+                        }.into_view()
+                    } else {
+                        view! {
+                            <div class="loading-message">Loading providers...</div>
+                        }.into_view()
+                    }}
+                </div>
                 
                 {move || {
                     if selected_prompt_name.get() == "Custom" {
@@ -605,6 +939,32 @@ where
             </div>
             
             <div class="input-container">
+                <ContextDisplay 
+                    context_manager=context_manager_for_display
+                    on_compress=move || {
+                        web_sys::console::log_1(&"Compress context clicked".into());
+                        // TODO: Implement compression
+                    }
+                    on_clear={
+                        move || {
+                            web_sys::console::log_1(&"Clear context clicked".into());
+                            context_manager_for_clear.clear_context();
+                            set_notebook.update(|nb| {
+                                nb.cells.clear();
+                                nb.cursor_position = CellId(0);
+                            });
+                            
+                            // Generate new conversation ID
+                            let new_id = Uuid::new_v4().to_string();
+                            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
+                                let _ = storage.set_item("current_conversation_id", &new_id);
+                            }
+                            
+                            // Reload to start fresh
+                            let _ = web_sys::window().unwrap().location().reload();
+                        }
+                    }
+                />
                 <textarea
                     class="chat-input"
                     placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
