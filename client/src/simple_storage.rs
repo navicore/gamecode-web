@@ -3,6 +3,8 @@ use web_sys::{window, Storage};
 use serde::{Serialize, Deserialize};
 use crate::storage::{StoredConversation, ContextState, ConversationMetadata, ConversationRef};
 
+const MAX_CONVERSATIONS: usize = 25;
+
 #[derive(Clone)]
 pub struct SimpleStorage;
 
@@ -18,6 +20,25 @@ impl SimpleStorage {
     
     pub fn save_conversation(&self, conversation: &StoredConversation) -> Result<(), JsValue> {
         let storage = Self::get_storage().ok_or("No localStorage")?;
+        
+        // Check if we're at the conversation limit
+        let all_conversations = self.list_conversations(100)?; // Get all conversations
+        if all_conversations.len() >= MAX_CONVERSATIONS {
+            // Check if this is a new conversation (not already in the list)
+            let is_new = !all_conversations.iter().any(|c| c.id == conversation.id);
+            
+            if is_new {
+                web_sys::console::log_1(&format!("At conversation limit ({}), removing oldest", MAX_CONVERSATIONS).into());
+                
+                // Find and remove the oldest conversation
+                if let Some(oldest) = all_conversations.last() {
+                    web_sys::console::log_1(&format!("Removing oldest conversation: {} ({})", 
+                        oldest.title, oldest.modified_at).into());
+                    self.delete_conversation(&oldest.id)?;
+                }
+            }
+        }
+        
         let key = format!("conversation_{}", conversation.id);
         let value = serde_json::to_string(conversation)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;

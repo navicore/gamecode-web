@@ -746,6 +746,10 @@ where
                                             "+ New Conversation"
                                         </button>
                                         
+                                        <div class="conversation-count">
+                                            {move || format!("{} / 25 conversations", conversations.get().len())}
+                                        </div>
+                                        
                                         <div class="conversation-list">
                                             {move || conversations.get().into_iter().map({
                                                 let conversation_id = conversation_id.clone();
