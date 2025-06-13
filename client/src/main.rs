@@ -8,7 +8,7 @@ mod api;
 mod components;
 mod notebook;
 
-use components::{auth::AuthForm, chat::Chat};
+use components::{auth::{AuthForm, get_stored_token, is_token_valid, clear_auth_token}, chat::Chat};
 
 #[component]
 fn App() -> impl IntoView {
@@ -36,15 +36,14 @@ fn HomePage() -> impl IntoView {
     
     // Check for existing token in localStorage
     create_effect(move |_| {
-        if let Some(window) = window() {
-            if let Ok(Some(stored_token)) = window.local_storage() {
-            if let Ok(Some(t)) = stored_token.get_item("auth_token") {
-                if !t.is_empty() {
-                    set_token.set(t);
-                    set_authenticated.set(true);
-                }
+        if let Some(auth_token) = get_stored_token() {
+            if is_token_valid(&auth_token) {
+                set_token.set(auth_token.token);
+                set_authenticated.set(true);
+            } else {
+                // Token expired, clear it
+                clear_auth_token();
             }
-        }
         }
     });
     
@@ -59,11 +58,7 @@ fn HomePage() -> impl IntoView {
                             on:click=move |_| {
                                 set_authenticated.set(false);
                                 set_token.set(String::new());
-                                if let Some(window) = window() {
-                                    if let Ok(Some(storage)) = window.local_storage() {
-                                        let _ = storage.remove_item("auth_token");
-                                    }
-                                }
+                                clear_auth_token();
                             }
                         >
                             "Logout"
@@ -77,7 +72,15 @@ fn HomePage() -> impl IntoView {
             <main>
                 {move || if authenticated.get() {
                     view! {
-                        <Chat token=token.get()/>
+                        <Chat 
+                            token=token.get()
+                            on_auth_error=move || {
+                                // Clear auth state and logout
+                                set_authenticated.set(false);
+                                set_token.set(String::new());
+                                clear_auth_token();
+                            }
+                        />
                     }.into_view()
                 } else {
                     view! {
@@ -85,12 +88,6 @@ fn HomePage() -> impl IntoView {
                             on_auth=move |token_value| {
                                 set_token.set(token_value.clone());
                                 set_authenticated.set(true);
-                                // Store token
-                                if let Some(window) = window() {
-                                    if let Ok(Some(storage)) = window.local_storage() {
-                                        let _ = storage.set_item("auth_token", &token_value);
-                                    }
-                                }
                             }
                         />
                     }.into_view()

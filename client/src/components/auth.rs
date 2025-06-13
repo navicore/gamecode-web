@@ -131,6 +131,8 @@ pub fn get_stored_token() -> Option<AuthToken> {
 
 pub fn clear_auth_token() {
     let _ = LocalStorage::delete("auth_token");
+    // Note: We intentionally do NOT clear dropdown selections here
+    // They should persist across login sessions
 }
 
 pub fn is_token_valid(token: &AuthToken) -> bool {
