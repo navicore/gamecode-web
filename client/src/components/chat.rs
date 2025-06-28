@@ -32,6 +32,9 @@ where
     let saved_prompt = storage.get_item("selected_prompt").ok().flatten().unwrap_or_else(|| "General Assistant".to_string());
     let saved_custom = storage.get_item("custom_prompt").ok().flatten().unwrap_or_default();
     let saved_input = storage.get_item("pending_input").ok().flatten().unwrap_or_default();
+    let saved_temperature = storage.get_item("temperature").ok().flatten()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.7);
     
     // Debug log
     web_sys::console::log_1(&format!("Component init - localStorage - Provider: '{}', Model: '{}', Prompt: '{}'", 
@@ -43,12 +46,14 @@ where
     let (system_prompts, set_system_prompts) = create_signal(Vec::<SystemPrompt>::new());
     let (selected_prompt_name, set_selected_prompt_name) = create_signal(saved_prompt);
     let (custom_prompt, set_custom_prompt) = create_signal(saved_custom);
+    let (temperature, set_temperature) = create_signal(saved_temperature);
     let (input_value, set_input_value) = create_signal(saved_input.clone());
     let (is_streaming, set_is_streaming) = create_signal(false);
     let (should_submit, set_should_submit) = create_signal(false);
     let (provider_manually_changed, set_provider_manually_changed) = create_signal(false);
     let (providers_loaded, set_providers_loaded) = create_signal(false);
     let (initial_load_complete, set_initial_load_complete) = create_signal(false);
+    let (has_messages, set_has_messages) = create_signal(false);
     
     // Clear saved input after loading
     if !saved_input.is_empty() {
@@ -134,6 +139,13 @@ where
                     
                 // Restore the context state
                 context_manager.restore_state(stored.context_state);
+                
+                // Check if conversation has messages before moving notebook
+                let has_msgs = stored.notebook.cells.iter().any(|cell| matches!(
+                    &cell.content, 
+                    CellContent::UserInput { .. } | CellContent::TextResponse { .. }
+                ));
+                set_has_messages.set(has_msgs);
                 
                 // Update notebook with stored cells
                 set_notebook.update(|nb| {
@@ -295,6 +307,16 @@ where
         }
     });
     
+    // Save temperature changes
+    create_effect(move |_| {
+        let temp = temperature.get();
+        if initial_load_complete.get() {
+            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
+                let _ = storage.set_item("temperature", &temp.to_string());
+            }
+        }
+    });
+    
     // Helper function to scroll to bottom
     let scroll_to_bottom = move || {
         if let Some(element) = notebook_ref.get() {
@@ -312,7 +334,15 @@ where
     
     // Auto-scroll to bottom when notebook changes
     create_effect(move |_| {
-        notebook.get(); // Subscribe to changes
+        let nb = notebook.get(); // Subscribe to changes
+        
+        // Update has_messages based on notebook content
+        let has_msgs = nb.cells.iter().any(|cell| matches!(
+            &cell.content, 
+            CellContent::UserInput { .. } | CellContent::TextResponse { .. }
+        ));
+        set_has_messages.set(has_msgs);
+        
         scroll_to_bottom();
     });
     
@@ -492,7 +522,7 @@ where
                 messages: context_messages,
                 model: Some(model),
                 system_prompt,
-                temperature: None,
+                temperature: Some(temperature.get_untracked()),
                 max_tokens: None,
             };
             
@@ -740,6 +770,7 @@ where
                                                 });
                                                 context_manager_clone.clear_context();
                                                 set_created_at.set(Utc::now());
+                                                set_has_messages.set(false);
                                                 set_show_conversation_dropdown.set(false);
                                             }
                                         >
@@ -779,6 +810,14 @@ where
                                                                             // Load the conversation
                                                                             if let Ok(Some(stored)) = simple_storage.load_conversation(&conv_id) {
                                                                                 context_manager.restore_state(stored.context_state);
+                                                                                
+                                                                                // Check if conversation has messages
+                                                                                let has_msgs = stored.notebook.cells.iter().any(|cell| matches!(
+                                                                                    &cell.content, 
+                                                                                    CellContent::UserInput { .. } | CellContent::TextResponse { .. }
+                                                                                ));
+                                                                                set_has_messages.set(has_msgs);
+                                                                                
                                                                                 set_notebook.update(|nb| {
                                                                                     *nb = stored.notebook;
                                                                                 });
@@ -820,6 +859,7 @@ where
                                                                             });
                                                                             context_manager_clone.clear_context();
                                                                             set_created_at.set(Utc::now());
+                                                                            set_has_messages.set(false);
                                                                         }
                                                                     }
                                                                 }
@@ -847,6 +887,7 @@ where
                                     <label class="selector-label">Provider</label>
                                     <select 
                                         class="selector-dropdown"
+                                        disabled=move || has_messages.get()
                                         on:change=move |ev| {
                                             set_provider_manually_changed.set(true);
                                             set_selected_provider.set(event_target_value(&ev));
@@ -868,6 +909,7 @@ where
                                     <label class="selector-label">Model</label>
                                     <select 
                                         class="selector-dropdown"
+                                        disabled=move || has_messages.get()
                                         on:change=move |ev| set_selected_model.set(event_target_value(&ev))
                                     >
                                         {move || {
@@ -905,6 +947,23 @@ where
                                             }).collect_view()
                                         }}
                                     </select>
+                                </div>
+                                
+                                <div class="selector-column">
+                                    <label class="selector-label">Temperature: {move || format!("{:.1}", temperature.get())}</label>
+                                    <input 
+                                        type="range"
+                                        class="temperature-slider"
+                                        min="0.0"
+                                        max="1.0"
+                                        step="0.1"
+                                        prop:value=move || temperature.get().to_string()
+                                        on:input=move |ev| {
+                                            if let Ok(val) = event_target_value(&ev).parse::<f32>() {
+                                                set_temperature.set(val);
+                                            }
+                                        }
+                                    />
                                 </div>
                             </>
                         }.into_view()
@@ -957,6 +1016,7 @@ where
                                 nb.cells.clear();
                                 nb.cursor_position = CellId(0);
                             });
+                            set_has_messages.set(false);
                             
                             // Generate new conversation ID
                             let new_id = Uuid::new_v4().to_string();
