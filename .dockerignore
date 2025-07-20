@@ -1,0 +1,24 @@
+# Git files
+.git
+.gitignore
+
+# Build artifacts
+target/
+dist/
+
+# Documentation
+docs/
+*.md
+
+# Scripts
+scripts/
+*.sh
+
+# IDE files
+.idea/
+.vscode/
+
+# Misc
+.DS_Store
+*.log
+*.tmp
