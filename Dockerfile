@@ -1,8 +1,8 @@
 # Multi-stage build for Rust web application
-FROM rust:1.86 AS builder
+FROM rust:1.88 AS builder
 
 # Install trunk for frontend build
-RUN cargo install trunk
+RUN cargo install trunk --locked
 RUN rustup target add wasm32-unknown-unknown
 
 WORKDIR /app
