@@ -6,18 +6,21 @@ use wasm_bindgen::JsCast;
 use crate::api::{ApiClient, ChatMessage, ChatRequest, ProviderInfo, SystemPrompt};
 use crate::notebook::{Notebook, CellContent, CellId};
 use crate::components::context_manager::{ContextManager, ContextDisplay};
+use crate::components::resize_handle::ResizeHandle;
 use crate::storage::{StoredConversation, ConversationMetadata};
 use crate::simple_storage::SimpleStorage;
 use chrono::{Utc, Local, TimeZone};
 use uuid::Uuid;
 
 #[component]
-pub fn Chat<F>(
+pub fn Chat<F, G>(
     token: String,
     on_auth_error: F,
+    on_logout: G,
 ) -> impl IntoView 
 where
     F: Fn() + Clone + 'static,
+    G: Fn() + Clone + 'static,
 {
     let token = create_rw_signal(token);
     let (notebook, set_notebook) = create_signal(Notebook::new());
@@ -724,6 +727,9 @@ where
     let context_manager_for_display = context_manager.clone();
     let context_manager_for_clear = context_manager.clone();
     
+    // State for dynamic input area height
+    let (input_area_height, set_input_area_height) = create_signal(200i32);
+    
     view! {
         <div class="chat-container">
             <div class="chat-header">
@@ -1001,7 +1007,14 @@ where
                 }).collect_view()}
             </div>
             
-            <div class="input-container">
+            <ResizeHandle 
+                on_resize=move |height| set_input_area_height.set(height)
+            />
+            
+            <div 
+                class="input-container"
+                style:height=move || format!("{}px", input_area_height.get())
+            >
                 <div class="input-wrapper" class=("streaming", move || is_streaming.get())>
                     {move || if is_streaming.get() {
                         view! {
@@ -1024,14 +1037,18 @@ where
                         on:input=move |ev| set_input_value.set(event_target_value(&ev))
                         on:keydown=handle_keydown
                         disabled=move || is_streaming.get()
-                        rows="3"
                     />
                 </div>
                 <ContextDisplay 
-                    context_manager=context_manager_for_display
+                    context_manager=context_manager_for_display.clone()
                     on_compress=move || {
-                        web_sys::console::log_1(&"Compress context clicked".into());
-                        // TODO: Implement compression
+                        web_sys::console::log_1(&"Manual compression requested".into());
+                        let compressed = context_manager_for_display.compress_context();
+                        if compressed {
+                            web_sys::console::log_1(&"Manual compression successful".into());
+                        } else {
+                            web_sys::console::log_1(&"Manual compression failed - not enough messages or no token savings".into());
+                        }
                     }
                     on_clear={
                         move || {
@@ -1053,6 +1070,7 @@ where
                             let _ = web_sys::window().unwrap().location().reload();
                         }
                     }
+                    on_logout=on_logout
                 />
             </div>
         </div>

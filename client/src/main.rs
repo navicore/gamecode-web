@@ -52,50 +52,34 @@ fn HomePage() -> impl IntoView {
     
     view! {
         <div class="app-container">
-            <header>
-                <h1>"GameCode Chat"</h1>
-                {move || if authenticated.get() {
-                    view! {
-                        <button 
-                            class="logout-btn"
-                            on:click=move |_| {
-                                set_authenticated.set(false);
-                                set_token.set(String::new());
-                                clear_auth_token();
-                            }
-                        >
-                            "Logout"
-                        </button>
-                    }.into_view()
-                } else {
-                    view! { <span></span> }.into_view()
-                }}
-            </header>
-            
-            <main>
-                {move || if authenticated.get() {
-                    view! {
-                        <Chat 
-                            token=token.get()
-                            on_auth_error=move || {
-                                // Clear auth state and logout
-                                set_authenticated.set(false);
-                                set_token.set(String::new());
-                                clear_auth_token();
-                            }
-                        />
-                    }.into_view()
-                } else {
-                    view! {
-                        <AuthForm 
-                            on_auth=move |token_value| {
-                                set_token.set(token_value.clone());
-                                set_authenticated.set(true);
-                            }
-                        />
-                    }.into_view()
-                }}
-            </main>
+            {move || if authenticated.get() {
+                view! {
+                    <Chat 
+                        token=token.get()
+                        on_auth_error=move || {
+                            // Clear auth state and logout
+                            set_authenticated.set(false);
+                            set_token.set(String::new());
+                            clear_auth_token();
+                        }
+                        on_logout=move || {
+                            // User-initiated logout
+                            set_authenticated.set(false);
+                            set_token.set(String::new());
+                            clear_auth_token();
+                        }
+                    />
+                }.into_view()
+            } else {
+                view! {
+                    <AuthForm 
+                        on_auth=move |token_value| {
+                            set_token.set(token_value.clone());
+                            set_authenticated.set(true);
+                        }
+                    />
+                }.into_view()
+            }}
         </div>
     }
 }
