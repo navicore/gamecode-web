@@ -32,6 +32,12 @@
             overflow: hidden;
         }
         
+        .app-container {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
         /* Auth styles */
         .auth-container {
             display: flex;
@@ -101,7 +107,8 @@
         .chat-container {
             display: flex;
             flex-direction: column;
-            height: 100%;
+            height: 100vh;
+            position: relative;
             overflow: hidden;
         }
         
@@ -203,7 +210,7 @@
             overflow-y: auto;
             padding: 1rem;
             min-height: 0; /* Important for flexbox scrolling */
-            max-height: calc(100vh - 480px); /* Account for header, context display, and input area */
+            /* Remove max-height to let flexbox handle it properly */
         }
         
         .cell {
@@ -234,6 +241,7 @@
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
+            margin-top: auto; /* Push to bottom */
         }
         
         .input-wrapper {
@@ -511,6 +519,17 @@
         
         .context-action-btn:active {
             transform: translateY(0);
+        }
+        
+        .context-action-btn.logout:hover svg {
+            stroke: #e74c3c;
+        }
+        
+        .context-actions-separator {
+            width: 1px;
+            height: 20px;
+            background: #444;
+            margin: 0 4px;
         }
         
         /* Conversation Dropdown Styles */

@@ -32,6 +32,12 @@
             overflow: hidden;
         }
         
+        .app-container {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
         /* Auth styles */
         .auth-container {
             display: flex;
@@ -101,7 +107,8 @@
         .chat-container {
             display: flex;
             flex-direction: column;
-            height: 100%;
+            height: 100vh;
+            position: relative;
             overflow: hidden;
         }
         
@@ -203,7 +210,7 @@
             overflow-y: auto;
             padding: 1rem;
             min-height: 0; /* Important for flexbox scrolling */
-            max-height: calc(100vh - 480px); /* Account for header, context display, and input area */
+            /* Remove max-height to let flexbox handle it properly */
         }
         
         .cell {
@@ -234,6 +241,7 @@
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
+            margin-top: auto; /* Push to bottom */
         }
         
         .input-wrapper {
@@ -511,6 +519,17 @@
         
         .context-action-btn:active {
             transform: translateY(0);
+        }
+        
+        .context-action-btn.logout:hover svg {
+            stroke: #e74c3c;
+        }
+        
+        .context-actions-separator {
+            width: 1px;
+            height: 20px;
+            background: #444;
+            margin: 0 4px;
         }
         
         /* Conversation Dropdown Styles */
@@ -915,14 +934,14 @@
             }
         }
     </style>
-<link rel="modulepreload" href="/gamecode-client-71e369aea905c6c3.js" crossorigin="anonymous" integrity="sha384-5RHawACNRPSSodhmXvN0LHDta6ER5G7rjHhWcMTaqmUzeOMKn20//c5hd3V3IBy2"><link rel="preload" href="/gamecode-client-71e369aea905c6c3_bg.wasm" crossorigin="anonymous" integrity="sha384-zkGv4Bj4+GZEp64hM29EF5L5qpyVGDwd1KHKqa1f/LBhL6EddFWzIghoqRedE2fl" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/gamecode-client-bb79f48a062e96b1.js" crossorigin="anonymous" integrity="sha384-gxYZ6wGolQJfkJFH4VvkX9vLAkfEDVvL7EViQH4ylJAJH+RFLb7K5FHzCNav5CJa"><link rel="preload" href="/gamecode-client-bb79f48a062e96b1_bg.wasm" crossorigin="anonymous" integrity="sha384-OtrBFz8pIC+757oP4OMC6R8eY4bhbnLNGxmoWC2LZBLuDg6yxsYWBi3/aC1tzha+" as="fetch" type="application/wasm"></head>
 <body>
     <div id="app"></div>
     <!-- Trunk will inject the WASM app here -->
     
 <script type="module">
-import init, * as bindings from '/gamecode-client-71e369aea905c6c3.js';
-const wasm = await init({ module_or_path: '/gamecode-client-71e369aea905c6c3_bg.wasm' });
+import init, * as bindings from '/gamecode-client-bb79f48a062e96b1.js';
+const wasm = await init({ module_or_path: '/gamecode-client-bb79f48a062e96b1_bg.wasm' });
 
 
 window.wasmBindings = bindings;

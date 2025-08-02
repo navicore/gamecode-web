@@ -12,12 +12,14 @@ use chrono::{Utc, Local, TimeZone};
 use uuid::Uuid;
 
 #[component]
-pub fn Chat<F>(
+pub fn Chat<F, G>(
     token: String,
     on_auth_error: F,
+    on_logout: G,
 ) -> impl IntoView 
 where
     F: Fn() + Clone + 'static,
+    G: Fn() + Clone + 'static,
 {
     let token = create_rw_signal(token);
     let (notebook, set_notebook) = create_signal(Notebook::new());
@@ -1028,10 +1030,15 @@ where
                     />
                 </div>
                 <ContextDisplay 
-                    context_manager=context_manager_for_display
+                    context_manager=context_manager_for_display.clone()
                     on_compress=move || {
-                        web_sys::console::log_1(&"Compress context clicked".into());
-                        // TODO: Implement compression
+                        web_sys::console::log_1(&"Manual compression requested".into());
+                        let compressed = context_manager_for_display.compress_context();
+                        if compressed {
+                            web_sys::console::log_1(&"Manual compression successful".into());
+                        } else {
+                            web_sys::console::log_1(&"Manual compression failed - not enough messages or no token savings".into());
+                        }
                     }
                     on_clear={
                         move || {
@@ -1053,6 +1060,7 @@ where
                             let _ = web_sys::window().unwrap().location().reload();
                         }
                     }
+                    on_logout=on_logout
                 />
             </div>
         </div>
