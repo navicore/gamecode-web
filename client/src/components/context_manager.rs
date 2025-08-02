@@ -121,52 +121,69 @@ pub fn ContextDisplay(
     let cm6 = context_manager.clone();
     
     view! {
-        <div class="context-display">
-            <div class="context-header">
-                <h3>"Context Usage"</h3>
-                <div class="context-actions">
-                    <button 
-                        class="compress-btn"
-                        on:click=move |_| on_compress()
-                        title="Compress older messages to save space"
-                    >
-                        "Compress"
-                    </button>
-                    <button 
-                        class="clear-btn"
-                        on:click=move |_| on_clear()
-                        title="Clear all context and start fresh"
-                    >
-                        "Clear"
-                    </button>
-                </div>
-            </div>
-            
-            <div class="context-stats">
-                <div class="usage-bar">
+        <div class="context-footer">
+            <div class="context-progress-container">
+                <div class="context-progress-bar">
                     <div 
-                        class="usage-fill"
+                        class="context-progress-fill"
                         style:width=move || format!("{}%", cm1.get_usage_percentage())
                         class=("warning", move || cm2.get_usage_percentage() > 70.0)
                         class=("critical", move || cm3.get_usage_percentage() > 90.0)
-                    ></div>
+                    >
+                        <span class="context-progress-glow"></span>
+                    </div>
                 </div>
-                <div class="usage-text">
-                    {move || format!("{} / {} tokens ({:.0}%)", 
-                        cm4.total_tokens.get(), 
-                        MAX_CONTEXT_TOKENS,
-                        cm5.get_usage_percentage()
-                    )}
-                </div>
+                <span class="context-token-text">
+                    {move || {
+                        let tokens = cm4.total_tokens.get();
+                        let percentage = cm5.get_usage_percentage();
+                        if tokens < 1000 {
+                            format!("{} tokens", tokens)
+                        } else {
+                            format!("{:.1}k / {:.0}k ({:.0}%)", 
+                                tokens as f64 / 1000.0,
+                                MAX_CONTEXT_TOKENS as f64 / 1000.0,
+                                percentage
+                            )
+                        }
+                    }}
+                </span>
+            </div>
+            
+            <div class="context-footer-actions">
                 {move || if cm6.compression_count.get() > 0 {
                     view! {
-                        <div class="compression-count">
-                            {format!("Compressed {} times", cm6.compression_count.get())}
-                        </div>
+                        <span class="compression-indicator" title={format!("Compressed {} times", cm6.compression_count.get())}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 14l1 1 5-5-5-5-1 1 4 4-4 4z"/>
+                                <path d="M10 14l1 1 5-5-5-5-1 1 4 4-4 4z"/>
+                            </svg>
+                            {cm6.compression_count.get()}
+                        </span>
                     }.into_view()
                 } else {
                     view! { <span></span> }.into_view()
                 }}
+                
+                <button 
+                    class="context-action-btn compress"
+                    on:click=move |_| on_compress()
+                    title="Compress older messages to save space"
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 12h-6l4-4M2 12h6l-4 4M12 2v6l4-4M12 22v-6l-4 4"/>
+                    </svg>
+                </button>
+                <button 
+                    class="context-action-btn clear"
+                    on:click=move |_| on_clear()
+                    title="Clear all context and start fresh"
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
             </div>
         </div>
     }

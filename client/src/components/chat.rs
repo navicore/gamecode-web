@@ -1002,6 +1002,31 @@ where
             </div>
             
             <div class="input-container">
+                <div class="input-wrapper" class=("streaming", move || is_streaming.get())>
+                    {move || if is_streaming.get() {
+                        view! {
+                            <div class="streaming-indicator">
+                                <div class="streaming-dots">
+                                    <span class="dot"></span>
+                                    <span class="dot"></span>
+                                    <span class="dot"></span>
+                                </div>
+                                <span class="streaming-text">"Generating"</span>
+                            </div>
+                        }.into_view()
+                    } else {
+                        view! { <span></span> }.into_view()
+                    }}
+                    <textarea
+                        class="chat-input"
+                        placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
+                        prop:value=move || input_value.get()
+                        on:input=move |ev| set_input_value.set(event_target_value(&ev))
+                        on:keydown=handle_keydown
+                        disabled=move || is_streaming.get()
+                        rows="3"
+                    />
+                </div>
                 <ContextDisplay 
                     context_manager=context_manager_for_display
                     on_compress=move || {
@@ -1029,22 +1054,6 @@ where
                         }
                     }
                 />
-                <textarea
-                    class="chat-input"
-                    placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
-                    prop:value=move || input_value.get()
-                    on:input=move |ev| set_input_value.set(event_target_value(&ev))
-                    on:keydown=handle_keydown
-                    disabled=move || is_streaming.get()
-                    rows="3"
-                />
-                <button
-                    class="send-button"
-                    on:click=move |_| set_should_submit.set(true)
-                    disabled=move || is_streaming.get() || input_value.get().trim().is_empty()
-                >
-                    {move || if is_streaming.get() { "Streaming..." } else { "Send" }}
-                </button>
             </div>
         </div>
     }

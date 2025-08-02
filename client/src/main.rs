@@ -9,6 +9,7 @@ mod components;
 mod notebook;
 mod storage;
 mod simple_storage;
+mod markdown;
 
 use components::{auth::{AuthForm, get_stored_token, is_token_valid, clear_auth_token}, chat::Chat};
 
