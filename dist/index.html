@@ -241,10 +241,12 @@
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
-            margin-top: auto; /* Push to bottom */
+            overflow: hidden;
+            position: relative;
         }
         
         .input-wrapper {
+            flex: 1;
             padding: 1rem;
             padding-bottom: 0;
             background: #2d2d2d;
@@ -253,16 +255,19 @@
             gap: 0.5rem;
             border-top-left-radius: 8px;
             border-top-right-radius: 8px;
+            overflow-y: auto;
         }
         
         .chat-input {
             width: 100%;
+            flex: 1;
+            min-height: 60px;
             padding: 0.75rem;
             background: #1a1a1a;
             border: 1px solid #444;
             border-radius: 4px;
             color: #e0e0e0;
-            resize: vertical;
+            resize: none; /* Disable manual resize since we control it */
             font-family: inherit;
             font-size: 1rem;
             transition: all 0.3s;
@@ -391,6 +396,7 @@
             border-bottom-right-radius: 8px;
             margin-top: -1px;
             position: relative;
+            flex-shrink: 0; /* Don't let it shrink */
         }
         
         .context-progress-container {
@@ -530,6 +536,53 @@
             height: 20px;
             background: #444;
             margin: 0 4px;
+        }
+        
+        /* Resize handle styles */
+        .resize-handle {
+            height: 6px;
+            background: transparent;
+            cursor: ns-resize;
+            position: relative;
+            user-select: none;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        
+        .resize-handle:hover {
+            background: rgba(74, 158, 255, 0.1);
+        }
+        
+        .resize-handle.dragging {
+            background: rgba(74, 158, 255, 0.2);
+        }
+        
+        .resize-handle-bar {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 3px;
+            background: #444;
+            border-radius: 2px;
+            transition: background 0.2s;
+        }
+        
+        .resize-handle:hover .resize-handle-bar,
+        .resize-handle.dragging .resize-handle-bar {
+            background: #4a9eff;
+        }
+        
+        /* Body class when resizing */
+        body.resizing {
+            cursor: ns-resize !important;
+            user-select: none !important;
+        }
+        
+        body.resizing * {
+            cursor: ns-resize !important;
+            user-select: none !important;
         }
         
         /* Conversation Dropdown Styles */
@@ -934,14 +987,14 @@
             }
         }
     </style>
-<link rel="modulepreload" href="/gamecode-client-bb79f48a062e96b1.js" crossorigin="anonymous" integrity="sha384-gxYZ6wGolQJfkJFH4VvkX9vLAkfEDVvL7EViQH4ylJAJH+RFLb7K5FHzCNav5CJa"><link rel="preload" href="/gamecode-client-bb79f48a062e96b1_bg.wasm" crossorigin="anonymous" integrity="sha384-OtrBFz8pIC+757oP4OMC6R8eY4bhbnLNGxmoWC2LZBLuDg6yxsYWBi3/aC1tzha+" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/gamecode-client-930cfe4ab5daff9a.js" crossorigin="anonymous" integrity="sha384-h3nmit8P/0yn4bwVBwFtgQSuuKAfQU3nHAl4TEr49FZt0GcuDTJD+u9dYlgtX2AN"><link rel="preload" href="/gamecode-client-930cfe4ab5daff9a_bg.wasm" crossorigin="anonymous" integrity="sha384-00d423QVUT3Dxo51V0Xe4lucHqyyc0ShrLZXMp+bDw6ge6zzSqf1Fx5bP1wpUCV4" as="fetch" type="application/wasm"></head>
 <body>
     <div id="app"></div>
     <!-- Trunk will inject the WASM app here -->
     
 <script type="module">
-import init, * as bindings from '/gamecode-client-bb79f48a062e96b1.js';
-const wasm = await init({ module_or_path: '/gamecode-client-bb79f48a062e96b1_bg.wasm' });
+import init, * as bindings from '/gamecode-client-930cfe4ab5daff9a.js';
+const wasm = await init({ module_or_path: '/gamecode-client-930cfe4ab5daff9a_bg.wasm' });
 
 
 window.wasmBindings = bindings;
