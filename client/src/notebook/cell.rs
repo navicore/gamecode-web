@@ -171,15 +171,9 @@ pub fn CellView(cell: Cell) -> impl IntoView {
 
 #[component]
 fn Markdown(text: String) -> impl IntoView {
-    // Simple markdown rendering - in production, use a proper markdown parser
-    let html = text
-        .replace("**", "<strong>")
-        .replace("*", "<em>")
-        .replace("\n\n", "</p><p>")
-        .replace("\n", "<br>");
-    
+    // Use the enhanced markdown renderer from the markdown module
     view! {
-        <div class="markdown-content" inner_html=format!("<p>{}</p>", html)></div>
+        <crate::markdown::MarkdownRenderer text=text/>
     }
 }
 

@@ -532,15 +532,205 @@
                 width: calc(100vw - 2rem);
             }
         }
+        
+        /* Markdown and Code Block styles */
+        .markdown-content {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: #e0e0e0;
+        }
+        
+        .markdown-content h1 { 
+            font-size: 1.8rem; 
+            margin: 1rem 0 0.5rem 0;
+            font-weight: 600;
+        }
+        
+        .markdown-content h2 { 
+            font-size: 1.5rem; 
+            margin: 1rem 0 0.5rem 0;
+            font-weight: 600;
+        }
+        
+        .markdown-content h3 { 
+            font-size: 1.3rem; 
+            margin: 0.8rem 0 0.4rem 0;
+            font-weight: 600;
+        }
+        
+        .markdown-content p {
+            margin: 0.5rem 0;
+        }
+        
+        .markdown-content ul, .markdown-content ol {
+            margin: 0.5rem 0;
+            padding-left: 1.5rem;
+        }
+        
+        .markdown-content li {
+            margin: 0.25rem 0;
+        }
+        
+        .markdown-content blockquote {
+            border-left: 3px solid #4a9eff;
+            padding-left: 1rem;
+            margin: 0.5rem 0;
+            color: #b0b0b0;
+            font-style: italic;
+        }
+        
+        .markdown-content a {
+            color: #4a9eff;
+            text-decoration: none;
+        }
+        
+        .markdown-content a:hover {
+            text-decoration: underline;
+        }
+        
+        .markdown-content hr {
+            border: none;
+            border-top: 1px solid #444;
+            margin: 1rem 0;
+        }
+        
+        .inline-code {
+            background: #2d2d2d;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.9em;
+            color: #ff79c6;
+        }
+        
+        .code-block-wrapper {
+            background: #1e1e1e;
+            border-radius: 6px;
+            margin: 0.5rem 0;
+            overflow: hidden;
+            border: 1px solid #333;
+        }
+        
+        .code-block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            background: #2d2d2d;
+            border-bottom: 1px solid #333;
+        }
+        
+        .code-block-lang {
+            font-size: 0.85rem;
+            color: #888;
+            font-weight: 500;
+            text-transform: lowercase;
+        }
+        
+        .code-copy-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: transparent;
+            border: 1px solid #444;
+            color: #888;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            position: relative;
+        }
+        
+        .code-copy-btn:hover {
+            background: #333;
+            color: #e0e0e0;
+            border-color: #555;
+        }
+        
+        .code-copy-btn.copied {
+            background: #2d5a2d;
+            border-color: #4a9e4a;
+            color: #4a9e4a;
+        }
+        
+        .code-copy-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+        
+        .copy-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: #e0e0e0;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            margin-bottom: 0.25rem;
+        }
+        
+        .code-copy-btn:hover .copy-tooltip {
+            opacity: 1;
+        }
+        
+        .code-block-content {
+            padding: 1rem;
+            overflow-x: auto;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        .code-block-content pre {
+            margin: 0;
+            background: transparent;
+        }
+        
+        .code-block-content code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+        }
+        
+        /* Syntax highlighting theme colors (base16-ocean.dark) */
+        .code-block-content .highlight {
+            background: #2b303b;
+        }
+        
+        /* Scrollbar styling for code blocks */
+        .code-block-content::-webkit-scrollbar {
+            height: 8px;
+            width: 8px;
+        }
+        
+        .code-block-content::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        
+        .code-block-content::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+        
+        .code-block-content::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
     </style>
-<link rel="modulepreload" href="/gamecode-client-76783aca6c810462.js" crossorigin="anonymous" integrity="sha384-51iMSSGGf6iQIGk+0nVlyX98P6OUqdWvMl4sbUNEahx67JGKfxtIsIRR3yX+43X9"><link rel="preload" href="/gamecode-client-76783aca6c810462_bg.wasm" crossorigin="anonymous" integrity="sha384-owmAMHrVFuuc5efM0D2A22KadcnkPCOqVpo49LWjg8bcxpTBYNQbmEV/vv3QatjT" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/gamecode-client-8795340449ffcf11.js" crossorigin="anonymous" integrity="sha384-8yv2HirchPoaY5dfRA7eMvfySKtJ5NxhYzGWVEsehStsjtC7gX8Oa+Rbak8FnKzk"><link rel="preload" href="/gamecode-client-8795340449ffcf11_bg.wasm" crossorigin="anonymous" integrity="sha384-bc1m0xDNXj1c4S+Gnss81q74ILI6Djj8m7B0qjiFZU8S4TiYgCWC1bIZYYPlp1ZZ" as="fetch" type="application/wasm"></head>
 <body>
     <div id="app"></div>
     <!-- Trunk will inject the WASM app here -->
     
 <script type="module">
-import init, * as bindings from '/gamecode-client-76783aca6c810462.js';
-const wasm = await init({ module_or_path: '/gamecode-client-76783aca6c810462_bg.wasm' });
+import init, * as bindings from '/gamecode-client-8795340449ffcf11.js';
+const wasm = await init({ module_or_path: '/gamecode-client-8795340449ffcf11_bg.wasm' });
 
 
 window.wasmBindings = bindings;
