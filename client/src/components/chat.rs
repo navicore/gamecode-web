@@ -604,11 +604,33 @@ where
                                 return;
                             }
                             
+                            // Try to get error details from response body
+                            let status = resp.status();
+                            let error_message = match JsFuture::from(resp.text().unwrap()).await {
+                                Ok(text_value) => {
+                                    if let Some(text) = text_value.as_string() {
+                                        // Try to parse as JSON error
+                                        if let Ok(error_obj) = serde_json::from_str::<serde_json::Value>(&text) {
+                                            if let Some(msg) = error_obj.get("error").and_then(|e| e.as_str()) {
+                                                msg.to_string()
+                                            } else {
+                                                format!("Server error: {} - {}", status, text)
+                                            }
+                                        } else {
+                                            format!("Server error: {} - {}", status, text)
+                                        }
+                                    } else {
+                                        format!("Server error: {}", status)
+                                    }
+                                }
+                                Err(_) => format!("Server error: {}", status),
+                            };
+                            
                             set_notebook.update(|nb| {
                                 nb.cells.push(crate::notebook::Cell {
                                     id: CellId(nb.cells.len()),
                                     content: CellContent::Error {
-                                        message: format!("Server error: {}", resp.status()),
+                                        message: error_message,
                                         details: None,
                                     },
                                     timestamp: chrono::Utc::now(),
@@ -649,30 +671,50 @@ where
                                                 if let Some(data_line) = event.lines().find(|line| line.starts_with("data: ")) {
                                                     let data = &data_line[6..]; // Skip "data: "
                                                     
-                                                    if let Ok(chunk) = serde_json::from_str::<crate::api::ChatChunk>(data) {
-                                                        complete_response.push_str(&chunk.text);
-                                                        
-                                                        set_notebook.update(|nb| {
-                                                            nb.update_streaming_response(response_id, &chunk.text);
-                                                            if chunk.done {
-                                                                nb.finalize_streaming_response(response_id);
-                                                            }
-                                                        });
-                                                        
-                                                        // Scroll during streaming
-                                                        scroll_to_bottom();
-                                                        
-                                                        if chunk.done {
-                                                            // Add complete response to context
-                                                            let assistant_msg = ChatMessage {
-                                                                role: "assistant".to_string(),
-                                                                content: complete_response.clone(),
-                                                            };
-                                                            context_manager_clone.add_message(assistant_msg);
+                                                    match serde_json::from_str::<crate::api::ChatChunk>(data) {
+                                                        Ok(chunk) => {
+                                                            complete_response.push_str(&chunk.text);
                                                             
-                                                            set_is_streaming.set(false);
-                                                            return;
+                                                            set_notebook.update(|nb| {
+                                                                nb.update_streaming_response(response_id, &chunk.text);
+                                                                if chunk.done {
+                                                                    nb.finalize_streaming_response(response_id);
+                                                                }
+                                                            });
+                                                            
+                                                            // Scroll during streaming
+                                                            scroll_to_bottom();
+                                                            
+                                                            if chunk.done {
+                                                                // Add complete response to context
+                                                                let assistant_msg = ChatMessage {
+                                                                    role: "assistant".to_string(),
+                                                                    content: complete_response.clone(),
+                                                                };
+                                                                context_manager_clone.add_message(assistant_msg);
+                                                            }
                                                         }
+                                                        Err(_) => {
+                                                            // Try to parse as error response
+                                                            if let Ok(error_obj) = serde_json::from_str::<serde_json::Value>(data) {
+                                                                if let Some(error_msg) = error_obj.get("error").and_then(|e| e.as_str()) {
+                                                                    web_sys::console::error_1(&format!("Server error: {}", error_msg).into());
+                                                                    
+                                                                    // Show error to user
+                                                                    set_notebook.update(|nb| {
+                                                                        if let Some(cell) = nb.get_cell_mut(response_id) {
+                                                                            cell.content = CellContent::Error { 
+                                                                                message: error_msg.to_string(),
+                                                                                details: None
+                                                                            };
+                                                                        }
+                                                                    });
+                                                                    
+                                                                    set_is_streaming.set(false);
+                                                                    break;
+                                                                }
+                                                            }
+                                                    }
                                                     }
                                                 }
                                             }

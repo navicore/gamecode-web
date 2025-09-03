@@ -135,6 +135,9 @@ impl InferenceProvider for OllamaProvider {
         let url = format!("{}/api/chat", self.config.base_url);
         tracing::info!("Sending request to: {}", url);
         
+        // Log the request we're sending
+        tracing::debug!("Sending Ollama request: {}", serde_json::to_string_pretty(&ollama_request)?);
+        
         let response = self.client
             .post(&url)
             .json(&ollama_request)
@@ -142,7 +145,16 @@ impl InferenceProvider for OllamaProvider {
             .await?;
         
         if !response.status().is_success() {
-            anyhow::bail!("Ollama request failed: {}", response.status());
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_else(|_| "Unable to read error response".to_string());
+            tracing::error!("Ollama request failed with status {}: {}", status, error_text);
+            
+            // Check for common model-specific errors
+            if error_text.contains("currentDate") && error_text.contains("not defined") {
+                anyhow::bail!("Model error: This model requires template functions not yet supported by your Ollama version. Please try a different model or wait for an Ollama update.");
+            }
+            
+            anyhow::bail!("Ollama request failed: {} - {}", status, error_text);
         }
         
         tracing::info!("Ollama response status: {}", response.status());
