@@ -20,13 +20,7 @@ impl IntoResponse for AppError {
         let (status, error_message) = match self {
             AppError::Internal(err) => {
                 tracing::error!("Internal error: {:?}", err);
-                // Check if this is a model-specific error we should show to the user
-                let error_str = err.to_string();
-                if error_str.contains("Model error:") || error_str.contains("currentDate") {
-                    (StatusCode::INTERNAL_SERVER_ERROR, error_str)
-                } else {
-                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
-                }
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
             }
             AppError::Unauthorized => {
                 (StatusCode::UNAUTHORIZED, "Unauthorized".to_string())

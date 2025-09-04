@@ -209,25 +209,11 @@ async fn chat(
         max_tokens: req.max_tokens,
     };
     
-    tracing::info!("Messages count: {}", req.messages.len());
-    for (i, msg) in req.messages.iter().enumerate() {
-        tracing::debug!("Message {}: role={}, content_length={}", i, msg.role, msg.content.len());
-        if msg.content.len() > 100 {
-            tracing::debug!("Message {} content (first 100 chars): {}...", i, &msg.content[..100]);
-        } else {
-            tracing::debug!("Message {} content: {}", i, msg.content);
-        }
-    }
+    tracing::info!("Messages: {:?}", req.messages);
     
-    let mut stream = match state.providers
+    let mut stream = state.providers
         .chat(&req.provider, chat_request)
-        .await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("Failed to initiate chat with provider {}: {:?}", req.provider, e);
-            return Err(AppError::from(e));
-        }
-    };
+        .await?;
     
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     
