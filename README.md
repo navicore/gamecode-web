@@ -7,7 +7,6 @@ A secure web chat interface for AI models, starting with local Ollama integratio
 - **Frontend**: Rust/Leptos WebAssembly app
 - **Backend**: Rust/Axum server with provider abstraction
 - **Security**: Password protection with JWT sessions
-- **Deployment**: ngrok tunnel for secure external access
 
 ## Quick Start
 
@@ -20,11 +19,6 @@ ollama run fortean
 ```bash
 cd server
 cargo run --release
-```
-
-### 3. Access via ngrok
-```bash
-ngrok http 8080
 ```
 
 ## Configuration

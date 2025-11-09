@@ -1,26 +1,33 @@
 # Multi-stage build for Rust web application
 FROM rust:1.88 AS builder
 
-# Install trunk for frontend build
-RUN cargo install trunk --locked
-RUN rustup target add wasm32-unknown-unknown
+# Install build tools once and cache in layer
+RUN cargo install trunk --locked && \
+    rustup target add wasm32-unknown-unknown
 
 WORKDIR /app
 
-# Copy manifests
+# Copy only manifest files first for better layer caching
 COPY Cargo.toml Cargo.lock ./
 COPY server/Cargo.toml server/
 COPY client/Cargo.toml client/
+COPY build.rs ./
 
-# Copy source code
+# Create dummy source files to build dependencies
+RUN mkdir -p src server/src client/src && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > server/src/main.rs && \
+    echo "fn main() {}" > client/src/main.rs
+
+# Build dependencies only (will be cached unless Cargo.toml changes)
+RUN cargo build --release --manifest-path server/Cargo.toml || true
+
+# Copy actual source code
 COPY src ./src
 COPY server/src ./server/src
 COPY client/src ./client/src
 COPY client/index.html ./client/
 COPY client/Trunk.toml ./client/
-COPY build.rs ./
-
-# Copy config files
 COPY config ./config
 COPY client/config ./client/config
 
@@ -28,11 +35,11 @@ COPY client/config ./client/config
 WORKDIR /app/client
 RUN trunk build --release
 
-# Build backend
+# Build backend (dependencies already compiled)
 WORKDIR /app
 RUN cargo build --release --manifest-path server/Cargo.toml
 
-# Final stage
+# Final stage - minimal runtime image
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
@@ -41,16 +48,12 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy the binary
+# Copy artifacts from builder
 COPY --from=builder /app/target/release/gamecode-server /app/
-
-# Copy frontend dist
 COPY --from=builder /app/dist /app/dist
-
-# Copy config
 COPY config /app/config
 
-# Create a non-root user
+# Create non-root user
 RUN useradd -m -u 1001 gamecode && chown -R gamecode:gamecode /app
 USER gamecode
 
