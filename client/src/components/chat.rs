@@ -514,11 +514,19 @@ where
         let context_manager_clone = context_manager.clone();
         spawn_local(async move {
             web_sys::console::log_1(&"Inside spawn_local".into());
+
+            // Create a 2-minute timeout future
+            use gloo_timers::future::TimeoutFuture;
+            use futures::FutureExt;
+
+            let timeout_duration = std::time::Duration::from_secs(120); // 2 minutes
+            let timeout = TimeoutFuture::new(timeout_duration.as_millis() as u32);
+
             let client = ApiClient::new();
-            
+
             // Get full context for request
             let context_messages = context_manager_clone.get_context_for_request();
-            
+
             // Send request and handle streaming response
             let request = ChatRequest {
                 provider: provider.clone(),
@@ -528,10 +536,12 @@ where
                 temperature: Some(temperature.get_untracked()),
                 max_tokens: None,
             };
-            
-            // Use web-sys to make the request and handle streaming
-            web_sys::console::log_1(&"Starting streaming request".into());
-            if let Some(window) = web_sys::window() {
+
+            // Wrap the main request logic in a future
+            let request_future = async {
+                // Use web-sys to make the request and handle streaming
+                web_sys::console::log_1(&"Starting streaming request".into());
+                if let Some(window) = web_sys::window() {
                 use wasm_bindgen::JsCast;
                 use wasm_bindgen_futures::JsFuture;
                 use web_sys::{Request, RequestInit, Response, Headers};
@@ -711,6 +721,37 @@ where
                         });
                         set_is_streaming.set(false);
                     }
+                }
+            }
+            }; // End of request_future async block
+
+            // Race the request against the timeout
+            futures::select! {
+                _ = request_future.fuse() => {
+                    // Request completed normally (streaming state already cleared in the branches above)
+                    web_sys::console::log_1(&"Request completed successfully".into());
+                }
+                _ = timeout.fuse() => {
+                    // Timeout occurred - clear streaming state and add error
+                    web_sys::console::error_1(&"Request timed out after 2 minutes".into());
+                    set_is_streaming.set(false);
+                    set_notebook.update(|nb| {
+                        // Remove the streaming response cell if it still exists
+                        if let Some(pos) = nb.cells.iter().position(|c| c.id == response_id) {
+                            nb.cells.remove(pos);
+                        }
+
+                        // Add timeout error cell
+                        nb.cells.push(crate::notebook::Cell {
+                            id: CellId(nb.cells.len()),
+                            content: CellContent::Error {
+                                message: "Request timed out".to_string(),
+                                details: Some("The AI model didn't respond within 2 minutes. This may be due to high load or network issues. Please try again.".to_string()),
+                            },
+                            timestamp: chrono::Utc::now(),
+                            metadata: Default::default(),
+                        });
+                    });
                 }
             }
         });
