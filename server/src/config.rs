@@ -1,86 +1,113 @@
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::{env, fs};
-use toml;
+use anyhow::{anyhow, Context, Result};
+use argon2::{
+    password_hash::{rand_core::OsRng, SaltString},
+    Argon2, PasswordHasher,
+};
+use rand::{distributions::Alphanumeric, Rng};
+use std::env;
+use tracing::warn;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub auth: AuthConfig,
     pub providers: ProvidersConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub port: u16,
     pub static_dir: String,
     pub max_request_size: usize,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone)]
 pub struct AuthConfig {
-    pub password_hash: String,  // Argon2 hash of the shared password
+    pub password_hash: String,
     pub jwt_secret: String,
     pub session_duration_hours: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone)]
 pub struct ProvidersConfig {
     pub ollama: Option<OllamaConfig>,
-    // Future: bedrock, openai, etc.
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone)]
 pub struct OllamaConfig {
     pub enabled: bool,
     pub base_url: String,
-    #[serde(default)]
-    pub models: Vec<String>,  // Deprecated - models are now fetched dynamically
     pub default_model: String,
     pub timeout_seconds: u64,
 }
 
 impl Config {
     pub fn load() -> Result<Self> {
-        // Try environment variable first
-        if let Ok(config_path) = env::var("GAMECODE_CONFIG") {
-            Self::from_file(&config_path)
-        } else {
-            // Default config path
-            Self::from_file("config/default.toml")
-        }
-    }
+        let plaintext_password = env::var("GAMECODE_AUTH_PASSWORD")
+            .context("GAMECODE_AUTH_PASSWORD must be set")?;
+        let password_hash = hash_password(&plaintext_password)?;
 
-    fn from_file(path: &str) -> Result<Self> {
-        let content = fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
-        Ok(config)
+        let jwt_secret = match env::var("GAMECODE_AUTH_JWT_SECRET") {
+            Ok(s) if !s.is_empty() => s,
+            _ => {
+                warn!(
+                    "GAMECODE_AUTH_JWT_SECRET not set — generating ephemeral secret; \
+                     all sessions invalidate on restart"
+                );
+                generate_random_secret(48)
+            }
+        };
+
+        let ollama_enabled = parse_env("GAMECODE_OLLAMA_ENABLED", true);
+        let ollama = if ollama_enabled {
+            Some(OllamaConfig {
+                enabled: true,
+                base_url: env::var("GAMECODE_OLLAMA_BASE_URL")
+                    .context("GAMECODE_OLLAMA_BASE_URL must be set when ollama is enabled")?,
+                default_model: env::var("GAMECODE_OLLAMA_DEFAULT_MODEL")
+                    .context("GAMECODE_OLLAMA_DEFAULT_MODEL must be set when ollama is enabled")?,
+                timeout_seconds: parse_env("GAMECODE_OLLAMA_TIMEOUT_SECONDS", 60u64),
+            })
+        } else {
+            None
+        };
+
+        Ok(Config {
+            server: ServerConfig {
+                port: parse_env("GAMECODE_SERVER_PORT", 8080u16),
+                static_dir: env::var("GAMECODE_SERVER_STATIC_DIR")
+                    .unwrap_or_else(|_| "dist".to_string()),
+                max_request_size: parse_env("GAMECODE_SERVER_MAX_REQUEST_SIZE", 10 * 1024 * 1024),
+            },
+            auth: AuthConfig {
+                password_hash,
+                jwt_secret,
+                session_duration_hours: parse_env("GAMECODE_AUTH_SESSION_DURATION_HOURS", 24u64),
+            },
+            providers: ProvidersConfig { ollama },
+        })
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig {
-                port: 8080,
-                static_dir: "dist".to_string(),
-                max_request_size: 10 * 1024 * 1024, // 10MB
-            },
-            auth: AuthConfig {
-                // This is "gamecode" hashed - CHANGE IN PRODUCTION!
-                password_hash: "$argon2id$v=19$m=19456,t=2,p=1$VE0Yc3hKakUwZWhqazhEMg$Rvzj1F8qRvLiDZ2bxiXPYdjUzZ3S4E8uFz2dMcLbKj0".to_string(),
-                jwt_secret: "change-me-in-production".to_string(),
-                session_duration_hours: 24,
-            },
-            providers: ProvidersConfig {
-                ollama: Some(OllamaConfig {
-                    enabled: true,
-                    base_url: "http://localhost:11434".to_string(),
-                    models: vec!["fortean".to_string()],
-                    default_model: "fortean".to_string(),
-                    timeout_seconds: 300,
-                }),
-            },
-        }
-    }
+fn hash_password(plaintext: &str) -> Result<String> {
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(plaintext.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .map_err(|e| anyhow!("failed to hash password: {e}"))
+}
+
+fn generate_random_secret(len: usize) -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(len)
+        .map(char::from)
+        .collect()
+}
+
+fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }

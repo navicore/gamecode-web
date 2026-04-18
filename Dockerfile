@@ -41,7 +41,6 @@ EXPOSE 8080
 
 # Set environment variables
 ENV RUST_LOG=info
-ENV GAMECODE_CONFIG=/app/config/default.toml
 
 # Run the server
 CMD ["./gamecode-server"]
