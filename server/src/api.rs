@@ -10,7 +10,7 @@ use std::{convert::Infallible, sync::Arc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
-    auth::{verify_password, generate_token, AuthRequest, AuthResponse, AuthUser},
+    auth::{generate_token, verify_password, AuthRequest, AuthResponse, AuthUser},
     error::AppError,
     providers::ChatRequest,
     AppState,
@@ -40,7 +40,7 @@ struct ProviderStatus {
 
 async fn health(State(state): State<Arc<AppState>>) -> Result<Json<HealthResponse>, AppError> {
     let mut providers = Vec::new();
-    
+
     for provider_name in state.providers.list_available() {
         if let Some(provider) = state.providers.get(&provider_name) {
             providers.push(ProviderStatus {
@@ -49,7 +49,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Result<Json<HealthRespons
             });
         }
     }
-    
+
     Ok(Json(HealthResponse {
         status: "ok".to_string(),
         providers,
@@ -63,17 +63,16 @@ async fn authenticate(
     // Debug log
     tracing::info!("Auth attempt with password length: {}", req.password.len());
     tracing::debug!("Expected hash: {}", &state.config.auth.password_hash);
-    
+
     // Verify password
-    verify_password(&req.password, &state.config.auth.password_hash)
-        .map_err(|e| {
-            tracing::warn!("Password verification failed: {:?}", e);
-            AppError::Unauthorized
-        })?;
-    
+    verify_password(&req.password, &state.config.auth.password_hash).map_err(|e| {
+        tracing::warn!("Password verification failed: {:?}", e);
+        AppError::Unauthorized
+    })?;
+
     // Generate token
     let token = generate_token(&state.config.auth)?;
-    
+
     Ok(Json(AuthResponse {
         token,
         expires_in: state.config.auth.session_duration_hours * 3600,
@@ -96,7 +95,7 @@ async fn list_providers(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ProvidersResponse>, AppError> {
     let mut providers = Vec::new();
-    
+
     for provider_name in state.providers.list_available() {
         if let Some(provider) = state.providers.get(&provider_name) {
             if let Ok(models) = provider.list_models().await {
@@ -107,7 +106,7 @@ async fn list_providers(
             }
         }
     }
-    
+
     Ok(Json(ProvidersResponse { providers }))
 }
 
@@ -133,18 +132,18 @@ async fn list_prompts(
         "/usr/local/etc/gamecode-web/prompts.toml",
         "config/prompts.toml",
     ];
-    
+
     let mut prompts = None;
     for path in prompts_paths {
         if let Ok(content) = fs::read_to_string(path) {
             tracing::info!("Loading prompts from: {}", path);
-            
+
             // Parse TOML
             #[derive(Deserialize)]
             struct PromptsConfig {
                 prompts: Vec<SystemPrompt>,
             }
-            
+
             match toml::from_str::<PromptsConfig>(&content) {
                 Ok(config) => {
                     prompts = Some(config.prompts);
@@ -156,12 +155,12 @@ async fn list_prompts(
             }
         }
     }
-    
+
     let prompts = prompts.unwrap_or_else(|| {
         tracing::info!("Using default prompts (no prompts.toml found)");
         get_default_prompts()
     });
-    
+
     Ok(Json(PromptsResponse { prompts }))
 }
 
@@ -200,7 +199,7 @@ async fn chat(
     Json(req): Json<ChatRequestBody>,
 ) -> Result<Sse<UnboundedReceiverStream<Result<Event, Infallible>>>, AppError> {
     tracing::info!("Chat endpoint hit with provider: {}", req.provider);
-    
+
     let chat_request = ChatRequest {
         messages: req.messages.clone(),
         model: req.model,
@@ -208,43 +207,43 @@ async fn chat(
         temperature: req.temperature,
         max_tokens: req.max_tokens,
     };
-    
+
     tracing::info!("Messages: {:?}", req.messages);
-    
-    let mut stream = state.providers
-        .chat(&req.provider, chat_request)
-        .await?;
-    
+
+    let mut stream = state.providers.chat(&req.provider, chat_request).await?;
+
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    
+
     // Spawn task to convert provider stream to SSE events
     tokio::spawn(async move {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(chunk) => {
-                    let event = Event::default()
-                        .data(serde_json::to_string(&chunk).unwrap_or_default());
-                    
+                    let event =
+                        Event::default().data(serde_json::to_string(&chunk).unwrap_or_default());
+
                     if tx.send(Ok(event)).is_err() {
                         break;
                     }
-                    
+
                     if chunk.done {
                         break;
                     }
                 }
                 Err(e) => {
-                    let error_event = Event::default()
-                        .data(serde_json::to_string(&serde_json::json!({
+                    let error_event = Event::default().data(
+                        serde_json::to_string(&serde_json::json!({
                             "error": e.to_string()
-                        })).unwrap_or_default());
-                    
+                        }))
+                        .unwrap_or_default(),
+                    );
+
                     let _ = tx.send(Ok(error_event));
                     break;
                 }
             }
         }
     });
-    
+
     Ok(Sse::new(UnboundedReceiverStream::new(rx)))
 }

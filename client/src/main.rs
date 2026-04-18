@@ -2,25 +2,26 @@ use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
 use wasm_bindgen::JsCast;
-use web_sys::{window, Document};
-
 mod api;
 mod components;
-mod notebook;
-mod storage;
-mod simple_storage;
 mod markdown;
+mod notebook;
+mod simple_storage;
+mod storage;
 
-use components::{auth::{AuthForm, get_stored_token, is_token_valid, clear_auth_token}, chat::Chat};
+use components::{
+    auth::{clear_auth_token, get_stored_token, is_token_valid, AuthForm},
+    chat::Chat,
+};
 
 #[component]
 fn App() -> impl IntoView {
     provide_meta_context();
-    
+
     view! {
         <Title text="GameCode Chat"/>
         <Meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        
+
         <Router>
             <Routes>
                 <Route path="/" view=HomePage/>
@@ -33,10 +34,10 @@ fn App() -> impl IntoView {
 #[component]
 fn HomePage() -> impl IntoView {
     web_sys::console::log_1(&"HomePage component rendering...".into());
-    
+
     let (authenticated, set_authenticated) = create_signal(false);
     let (token, set_token) = create_signal(String::new());
-    
+
     // Check for existing token in localStorage
     create_effect(move |_| {
         if let Some(auth_token) = get_stored_token() {
@@ -49,12 +50,12 @@ fn HomePage() -> impl IntoView {
             }
         }
     });
-    
+
     view! {
         <div class="app-container">
             {move || if authenticated.get() {
                 view! {
-                    <Chat 
+                    <Chat
                         token=token.get()
                         on_auth_error=move || {
                             // Clear auth state and logout
@@ -72,7 +73,7 @@ fn HomePage() -> impl IntoView {
                 }.into_view()
             } else {
                 view! {
-                    <AuthForm 
+                    <AuthForm
                         on_auth=move |token_value| {
                             set_token.set(token_value.clone());
                             set_authenticated.set(true);
@@ -96,18 +97,15 @@ fn NotFound() -> impl IntoView {
 
 fn main() {
     console_error_panic_hook::set_once();
-    
+
     // Initialize tracing for WASM
     tracing_wasm::set_as_global_default();
-    
+
     // Mount the app to the #app div
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(app_div) = document.get_element_by_id("app") {
-                leptos::mount_to(
-                    app_div.unchecked_into(),
-                    || view! { <App/> },
-                );
+                leptos::mount_to(app_div.unchecked_into(), || view! { <App/> });
             }
         }
     }

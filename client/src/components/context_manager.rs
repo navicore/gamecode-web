@@ -1,6 +1,6 @@
-use leptos::*;
-use crate::storage::{estimate_context_tokens, ContextState};
 use crate::api::ChatMessage;
+use crate::storage::{estimate_context_tokens, ContextState};
+use leptos::*;
 
 const MAX_CONTEXT_TOKENS: usize = 4096; // Adjust based on your models
 const AUTO_COMPRESS_THRESHOLD: f32 = 0.85; // Compress at 85% full (leaves room for response)
@@ -22,23 +22,14 @@ impl ContextManager {
             compression_count: create_rw_signal(0),
         }
     }
-    
+
     pub fn restore_state(&self, state: ContextState) {
         self.messages.set(state.active_messages);
         self.compressed_summaries.set(state.compressed_summaries);
         self.total_tokens.set(state.total_tokens);
         self.compression_count.set(state.compression_count);
     }
-    
-    pub fn from_state(state: ContextState) -> Self {
-        Self {
-            messages: create_rw_signal(state.active_messages),
-            compressed_summaries: create_rw_signal(state.compressed_summaries),
-            total_tokens: create_rw_signal(state.total_tokens),
-            compression_count: create_rw_signal(state.compression_count),
-        }
-    }
-    
+
     pub fn to_state(&self) -> ContextState {
         ContextState {
             active_messages: self.messages.get(),
@@ -47,11 +38,11 @@ impl ContextManager {
             compression_count: self.compression_count.get(),
         }
     }
-    
+
     pub fn add_message(&self, message: ChatMessage) {
         self.messages.update(|msgs| msgs.push(message.clone()));
         self.update_token_count();
-        
+
         // Check if we need auto-compression
         if self.should_auto_compress() {
             web_sys::console::log_1(&"Auto-compression triggered".into());
@@ -62,10 +53,10 @@ impl ContextManager {
             }
         }
     }
-    
+
     pub fn get_context_for_request(&self) -> Vec<ChatMessage> {
         let mut context = Vec::new();
-        
+
         // Add compressed summaries as system messages
         for summary in self.compressed_summaries.get() {
             context.push(ChatMessage {
@@ -73,130 +64,139 @@ impl ContextManager {
                 content: format!("Previous conversation summary: {}", summary),
             });
         }
-        
+
         // Add active messages
         context.extend(self.messages.get());
-        
+
         context
     }
-    
+
     fn update_token_count(&self) {
         let messages_tokens = estimate_context_tokens(&self.messages.get());
-        let summary_tokens: usize = self.compressed_summaries.get()
+        let summary_tokens: usize = self
+            .compressed_summaries
+            .get()
             .iter()
             .map(|s| crate::storage::estimate_tokens(s))
             .sum();
-        
+
         self.total_tokens.set(messages_tokens + summary_tokens);
     }
-    
+
     fn should_auto_compress(&self) -> bool {
         let usage = self.total_tokens.get() as f32 / MAX_CONTEXT_TOKENS as f32;
         usage > AUTO_COMPRESS_THRESHOLD
     }
-    
+
     pub fn get_usage_percentage(&self) -> f32 {
         (self.total_tokens.get() as f32 / MAX_CONTEXT_TOKENS as f32) * 100.0
     }
-    
+
     pub fn get_total_tokens(&self) -> usize {
         self.total_tokens.get()
     }
-    
+
     pub fn compress_context(&self) -> bool {
         let current_messages = self.messages.get();
-        
+
         // Don't compress if we have too few messages
         if current_messages.len() < 6 {
             web_sys::console::log_1(&"Not enough messages to compress (need at least 6)".into());
             return false;
         }
-        
+
         // Calculate split point - keep last 30% of messages or at least 4 messages
         let total_msgs = current_messages.len();
         let keep_count = std::cmp::max(4, (total_msgs as f32 * 0.3).ceil() as usize);
         let compress_count = total_msgs - keep_count;
-        
+
         if compress_count < 4 {
-            web_sys::console::log_1(&format!(
-                "Not enough messages to compress effectively (would compress {} messages)", 
-                compress_count
-            ).into());
+            web_sys::console::log_1(
+                &format!(
+                    "Not enough messages to compress effectively (would compress {} messages)",
+                    compress_count
+                )
+                .into(),
+            );
             return false;
         }
-        
+
         // Split messages into compress and keep
         let messages_to_compress: Vec<ChatMessage> = current_messages
             .iter()
             .take(compress_count)
             .cloned()
             .collect();
-        
+
         let messages_to_keep: Vec<ChatMessage> = current_messages
             .iter()
             .skip(compress_count)
             .cloned()
             .collect();
-        
+
         // Create an intelligent summary
         let summary = self.create_summary(&messages_to_compress);
-        
+
         // Calculate token savings
         let original_tokens = estimate_context_tokens(&current_messages);
         let summary_tokens = crate::storage::estimate_tokens(&summary);
         let kept_tokens = estimate_context_tokens(&messages_to_keep);
         let new_total = summary_tokens + kept_tokens;
-        
-        web_sys::console::log_1(&format!(
-            "Compression: {} messages → summary + {} messages. Tokens: {} → {} (saved {})",
-            total_msgs,
-            keep_count,
-            original_tokens,
-            new_total,
-            original_tokens - new_total
-        ).into());
-        
+
+        web_sys::console::log_1(
+            &format!(
+                "Compression: {} messages → summary + {} messages. Tokens: {} → {} (saved {})",
+                total_msgs,
+                keep_count,
+                original_tokens,
+                new_total,
+                original_tokens - new_total
+            )
+            .into(),
+        );
+
         // Only compress if we actually save tokens
         if new_total >= (original_tokens as f32 * 0.9) as usize {
             web_sys::console::log_1(&"Compression wouldn't save enough tokens, skipping".into());
             return false;
         }
-        
+
         // Update state
         self.compressed_summaries.update(|sums| sums.push(summary));
         self.messages.set(messages_to_keep);
         self.compression_count.update(|c| *c += 1);
         self.update_token_count();
-        
+
         true
     }
-    
+
     fn create_summary(&self, messages: &[ChatMessage]) -> String {
         let mut summary_parts = Vec::new();
-        
+
         // Group messages into conversation turns
         let mut conversation_topics = Vec::new();
         let mut current_topic = Vec::new();
-        
+
         for msg in messages {
             current_topic.push(msg);
-            
+
             // Start new topic after assistant response
             if msg.role == "assistant" && !current_topic.is_empty() {
                 conversation_topics.push(current_topic.clone());
                 current_topic.clear();
             }
         }
-        
+
         // Add any remaining messages
         if !current_topic.is_empty() {
             conversation_topics.push(current_topic);
         }
-        
+
         // Summarize each topic
-        for topic_msgs in conversation_topics.iter().take(5) { // Limit to 5 most important topics
+        for topic_msgs in conversation_topics.iter().take(5) {
+            // Limit to 5 most important topics
             let mut topic_summary = String::new();
-            
+
             for msg in topic_msgs {
                 match msg.role.as_str() {
                     "user" => {
@@ -214,7 +214,7 @@ impl ContextManager {
                         } else {
                             content.clone()
                         };
-                        
+
                         if !topic_summary.is_empty() {
                             topic_summary.push_str(" → ");
                         }
@@ -242,7 +242,7 @@ impl ContextManager {
                         } else {
                             "responded"
                         };
-                        
+
                         topic_summary.push_str(&format!(" → Assistant: {}", summary));
                     }
                     "system" => {
@@ -254,30 +254,30 @@ impl ContextManager {
                     _ => {}
                 }
             }
-            
+
             if !topic_summary.is_empty() {
                 summary_parts.push(topic_summary);
             }
         }
-        
+
         // Create final summary
         let mut final_summary = String::from("Previous conversation context (compressed): ");
-        
+
         if summary_parts.is_empty() {
             final_summary.push_str("General discussion about the project.");
         } else {
             final_summary.push_str(&summary_parts.join(" | "));
         }
-        
+
         // Add note about compression
         final_summary.push_str(&format!(
             " [Compressed {} messages to save context space]",
             messages.len()
         ));
-        
+
         final_summary
     }
-    
+
     pub fn clear_context(&self) {
         self.messages.set(Vec::new());
         self.compressed_summaries.set(Vec::new());
@@ -299,12 +299,12 @@ pub fn ContextDisplay(
     let cm4 = context_manager.clone();
     let cm5 = context_manager.clone();
     let cm6 = context_manager.clone();
-    
+
     view! {
         <div class="context-footer">
             <div class="context-progress-container">
                 <div class="context-progress-bar">
-                    <div 
+                    <div
                         class="context-progress-fill"
                         style:width=move || format!("{}%", cm1.get_usage_percentage())
                         class=("warning", move || cm2.get_usage_percentage() > 70.0)
@@ -320,7 +320,7 @@ pub fn ContextDisplay(
                         if tokens < 1000 {
                             format!("{} tokens", tokens)
                         } else {
-                            format!("{:.1}k / {:.0}k ({:.0}%)", 
+                            format!("{:.1}k / {:.0}k ({:.0}%)",
                                 tokens as f64 / 1000.0,
                                 MAX_CONTEXT_TOKENS as f64 / 1000.0,
                                 percentage
@@ -329,7 +329,7 @@ pub fn ContextDisplay(
                     }}
                 </span>
             </div>
-            
+
             <div class="context-footer-actions">
                 {move || if cm6.compression_count.get() > 0 {
                     view! {
@@ -344,8 +344,8 @@ pub fn ContextDisplay(
                 } else {
                     view! { <span></span> }.into_view()
                 }}
-                
-                <button 
+
+                <button
                     class="context-action-btn compress"
                     on:click=move |_| on_compress()
                     title="Compress older messages to save space"
@@ -354,7 +354,7 @@ pub fn ContextDisplay(
                         <path d="M22 12h-6l4-4M2 12h6l-4 4M12 2v6l4-4M12 22v-6l-4 4"/>
                     </svg>
                 </button>
-                <button 
+                <button
                     class="context-action-btn clear"
                     on:click=move |_| on_clear()
                     title="Clear all context and start fresh"
@@ -364,12 +364,12 @@ pub fn ContextDisplay(
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                     </svg>
                 </button>
-                
+
                 {if let Some(logout_fn) = on_logout {
                     view! {
                         <>
                             <div class="context-actions-separator"></div>
-                            <button 
+                            <button
                                 class="context-action-btn logout"
                                 on:click=move |_| logout_fn()
                                 title="Sign out"

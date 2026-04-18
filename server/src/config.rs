@@ -43,8 +43,8 @@ pub struct OllamaConfig {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let plaintext_password = env::var("GAMECODE_AUTH_PASSWORD")
-            .context("GAMECODE_AUTH_PASSWORD must be set")?;
+        let plaintext_password =
+            env::var("GAMECODE_AUTH_PASSWORD").context("GAMECODE_AUTH_PASSWORD must be set")?;
         let password_hash = hash_password(&plaintext_password)?;
 
         let jwt_secret = match env::var("GAMECODE_AUTH_JWT_SECRET") {

@@ -12,17 +12,6 @@ pub enum ApiError {
     Server(String),
 }
 
-#[derive(Serialize)]
-pub struct AuthRequest {
-    pub password: String,
-}
-
-#[derive(Deserialize)]
-pub struct AuthResponse {
-    pub token: String,
-    pub expires_in: u64,
-}
-
 #[derive(Deserialize)]
 pub struct ProvidersResponse {
     pub providers: Vec<ProviderInfo>,
@@ -67,69 +56,47 @@ impl ApiClient {
             base_url: "/api".to_string(),
         }
     }
-    
-    pub async fn authenticate(&self, password: String) -> Result<AuthResponse, ApiError> {
-        let response = Request::post(&format!("{}/auth", self.base_url))
-            .json(&AuthRequest { password })
-            .map_err(|e| ApiError::Network(e.to_string()))?
-            .send()
-            .await
-            .map_err(|e| ApiError::Network(e.to_string()))?;
-        
-        if response.status() == 401 {
-            return Err(ApiError::Unauthorized);
-        }
-        
-        if !response.ok() {
-            return Err(ApiError::Server(format!("Status: {}", response.status())));
-        }
-        
-        response
-            .json::<AuthResponse>()
-            .await
-            .map_err(|e| ApiError::Network(e.to_string()))
-    }
-    
+
     pub async fn list_providers(&self, token: &str) -> Result<ProvidersResponse, ApiError> {
         let response = Request::get(&format!("{}/providers", self.base_url))
             .header("Authorization", &format!("Bearer {}", token))
             .send()
             .await
             .map_err(|e| ApiError::Network(e.to_string()))?;
-        
+
         if response.status() == 401 {
             return Err(ApiError::Unauthorized);
         }
-        
+
         if !response.ok() {
             return Err(ApiError::Server(format!("Status: {}", response.status())));
         }
-        
+
         response
             .json::<ProvidersResponse>()
             .await
             .map_err(|e| ApiError::Network(e.to_string()))
     }
-    
+
     pub fn chat_url(&self) -> String {
         format!("{}/chat", self.base_url)
     }
-    
+
     pub async fn list_prompts(&self, token: &str) -> Result<PromptsResponse, ApiError> {
         let response = Request::get(&format!("{}/prompts", self.base_url))
             .header("Authorization", &format!("Bearer {}", token))
             .send()
             .await
             .map_err(|e| ApiError::Network(e.to_string()))?;
-        
+
         if response.status() == 401 {
             return Err(ApiError::Unauthorized);
         }
-        
+
         if !response.ok() {
             return Err(ApiError::Server(format!("Status: {}", response.status())));
         }
-        
+
         response
             .json::<PromptsResponse>()
             .await
