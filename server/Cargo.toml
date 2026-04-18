@@ -27,7 +27,7 @@ async-stream = "0.3"
 
 # Security
 argon2 = "0.5"
-jsonwebtoken = "10"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 once_cell = "1.19"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 rand = "0.8"
