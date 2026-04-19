@@ -459,7 +459,7 @@ body.resizing-col * { user-select: none !important; }
 .thread {
   max-width: 760px;
   margin: 0 auto;
-  padding: 24px 32px 200px;
+  padding: 24px 32px 32px;
 }
 
 .msg {
@@ -650,6 +650,19 @@ body.resizing-col * { user-select: none !important; }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+.streaming-text {
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
 .err-card {
   background: color-mix(in oklch, var(--danger) 10%, var(--bg-elev));
   border: 1px solid color-mix(in oklch, var(--danger) 35%, transparent);
@@ -664,16 +677,14 @@ body.resizing-col * { user-select: none !important; }
 
 /* ===== Composer ===== */
 .composer-wrap {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
-  background: linear-gradient(to top, var(--bg) 60%, transparent);
-  padding: 24px 32px 20px;
-  pointer-events: none;
+  flex-shrink: 0;
+  background: var(--bg);
+  padding: 16px 32px 20px;
+  border-top: 1px solid var(--border);
 }
 .composer {
   max-width: 760px;
   margin: 0 auto;
-  pointer-events: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1016,13 +1027,13 @@ body.resizing-col * { user-select: none !important; }
   border: 2px solid transparent;
 }
 </style>
-<link rel="modulepreload" href="/gamecode-client-a0b0a8b882b0290b.js" crossorigin="anonymous" integrity="sha384-rEzC+oNJ+yU8Ai+M3+FdCyJ9qvk8+Mf2xeDvRezGxjFZHNsipPy5EUQcPCCubR7h"><link rel="preload" href="/gamecode-client-a0b0a8b882b0290b_bg.wasm" crossorigin="anonymous" integrity="sha384-+gTq+DC+AjSyc5v2w/LFFx97fLUKrK8JkDsqs7l3NAYJXIDGm2hXP7YzCY9JTrQd" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/gamecode-client-8278bb2cf81cb721.js" crossorigin="anonymous" integrity="sha384-jwoIjPdunPnzSfCWNksPRUj0rGyledt4895iSUtuIRqlWdciIoV5Z2U8CY7oHifb"><link rel="preload" href="/gamecode-client-8278bb2cf81cb721_bg.wasm" crossorigin="anonymous" integrity="sha384-eikEVE6syPhOAgd4jSPPA3MXBxn2529N2I/omexrw5MQTe+1dFw73fQSxLY4euHX" as="fetch" type="application/wasm"></head>
 <body>
 <div id="app"></div>
 
 <script type="module">
-import init, * as bindings from '/gamecode-client-a0b0a8b882b0290b.js';
-const wasm = await init({ module_or_path: '/gamecode-client-a0b0a8b882b0290b_bg.wasm' });
+import init, * as bindings from '/gamecode-client-8278bb2cf81cb721.js';
+const wasm = await init({ module_or_path: '/gamecode-client-8278bb2cf81cb721_bg.wasm' });
 
 
 window.wasmBindings = bindings;

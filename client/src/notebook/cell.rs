@@ -1,16 +1,15 @@
 use crate::components::persona_picker::persona_color_var;
-use crate::notebook::{Cell, CellContent};
+use crate::notebook::{Cell, CellContent, CellId, Notebook};
 use leptos::*;
 
 #[derive(Clone)]
 pub struct CellContext {
     pub user_initial: String,
     pub persona_name: String,
-    pub is_last: bool,
 }
 
 #[component]
-pub fn CellView(cell: Cell, ctx: CellContext) -> impl IntoView {
+pub fn CellView(cell: Cell, ctx: CellContext, notebook: ReadSignal<Notebook>) -> impl IntoView {
     match cell.content {
         CellContent::UserInput { text } => {
             let initial = ctx.user_initial.clone();
@@ -34,7 +33,7 @@ pub fn CellView(cell: Cell, ctx: CellContext) -> impl IntoView {
             .into_view()
         }
 
-        CellContent::TextResponse { text, streaming } => {
+        CellContent::TextResponse { .. } => {
             let persona = ctx.persona_name.clone();
             let color = persona_color_var(&persona);
             let model_tag = cell
@@ -42,7 +41,20 @@ pub fn CellView(cell: Cell, ctx: CellContext) -> impl IntoView {
                 .model
                 .clone()
                 .unwrap_or_else(|| "assistant".to_string());
-            let is_last = ctx.is_last;
+            let cell_id = cell.id;
+            let timestamp = cell.timestamp;
+
+            let streaming = create_memo(move |_| {
+                live_text_response(notebook, cell_id)
+                    .map(|(_, s)| s)
+                    .unwrap_or(false)
+            });
+            let text = create_memo(move |_| {
+                live_text_response(notebook, cell_id)
+                    .map(|(t, _)| t)
+                    .unwrap_or_default()
+            });
+
             view! {
                 <div class="msg">
                     <div class="msg-rail">
@@ -56,13 +68,24 @@ pub fn CellView(cell: Cell, ctx: CellContext) -> impl IntoView {
                                 <span class="dot" style:background=color.to_string()></span>
                                 <span>{model_tag}</span>
                             </span>
-                            <span class="msg-meta">{format_timestamp(&cell.timestamp)}</span>
+                            <span class="msg-meta">{format_timestamp(&timestamp)}</span>
                         </div>
                         <div class="msg-content">
-                            <crate::markdown::MarkdownRenderer
-                                text=text
-                                show_cursor=Signal::derive(move || streaming && is_last)
-                            />
+                            {move || if streaming.get() {
+                                view! {
+                                    <pre class="streaming-text">
+                                        {move || text.get()}
+                                        <span class="streaming-cursor"></span>
+                                    </pre>
+                                }.into_view()
+                            } else {
+                                view! {
+                                    <crate::markdown::MarkdownRenderer
+                                        text=text.get()
+                                        show_cursor=Signal::derive(|| false)
+                                    />
+                                }.into_view()
+                            }}
                         </div>
                     </div>
                 </div>
@@ -117,6 +140,18 @@ pub fn CellView(cell: Cell, ctx: CellContext) -> impl IntoView {
 
         _ => view! { <div></div> }.into_view(),
     }
+}
+
+fn live_text_response(notebook: ReadSignal<Notebook>, cell_id: CellId) -> Option<(String, bool)> {
+    notebook
+        .get()
+        .cells
+        .iter()
+        .find(|c| c.id == cell_id)
+        .and_then(|c| match &c.content {
+            CellContent::TextResponse { text, streaming } => Some((text.clone(), *streaming)),
+            _ => None,
+        })
 }
 
 fn format_timestamp(dt: &chrono::DateTime<chrono::Utc>) -> String {

@@ -459,7 +459,7 @@ body.resizing-col * { user-select: none !important; }
 .thread {
   max-width: 760px;
   margin: 0 auto;
-  padding: 24px 32px 200px;
+  padding: 24px 32px 32px;
 }
 
 .msg {
@@ -650,6 +650,19 @@ body.resizing-col * { user-select: none !important; }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+.streaming-text {
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
 .err-card {
   background: color-mix(in oklch, var(--danger) 10%, var(--bg-elev));
   border: 1px solid color-mix(in oklch, var(--danger) 35%, transparent);
@@ -664,16 +677,14 @@ body.resizing-col * { user-select: none !important; }
 
 /* ===== Composer ===== */
 .composer-wrap {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
-  background: linear-gradient(to top, var(--bg) 60%, transparent);
-  padding: 24px 32px 20px;
-  pointer-events: none;
+  flex-shrink: 0;
+  background: var(--bg);
+  padding: 16px 32px 20px;
+  border-top: 1px solid var(--border);
 }
 .composer {
   max-width: 760px;
   margin: 0 auto;
-  pointer-events: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

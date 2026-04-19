@@ -545,31 +545,31 @@ where
                             />
                         }.into_view()
                     } else {
-                        let cells = notebook.get().cells;
-                        let last_idx = cells.len().saturating_sub(1);
-                        let initial = user_initial.clone();
-                        let persona = selected_prompt_name.get_untracked();
+                        let initial_for_each = user_initial.clone();
                         view! {
                             <div class="thread">
-                                {cells.into_iter().enumerate().map(|(i, cell)| {
-                                    let ctx = CellContext {
-                                        user_initial: initial.clone(),
-                                        persona_name: persona.clone(),
-                                        is_last: i == last_idx,
-                                    };
-                                    view! { <CellView cell=cell ctx=ctx/> }
-                                }).collect_view()}
+                                <For
+                                    each=move || notebook.get().cells
+                                    key=|c| c.id.0
+                                    children=move |cell| {
+                                        let ctx = CellContext {
+                                            user_initial: initial_for_each.clone(),
+                                            persona_name: selected_prompt_name.get_untracked(),
+                                        };
+                                        view! { <CellView cell=cell ctx=ctx notebook=notebook/> }
+                                    }
+                                />
                             </div>
                         }.into_view()
                     }}
-                    <Composer
-                        input_value=input_value
-                        is_streaming=is_streaming
-                        temperature=temperature
-                        context_manager=cm_for_composer
-                        on_submit=on_submit
-                    />
                 </div>
+                <Composer
+                    input_value=input_value
+                    is_streaming=is_streaming
+                    temperature=temperature
+                    context_manager=cm_for_composer
+                    on_submit=on_submit
+                />
             </main>
         </div>
     }
