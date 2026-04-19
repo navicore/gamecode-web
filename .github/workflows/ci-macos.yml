@@ -1,0 +1,39 @@
+# This workflow ONLY calls `just` commands. The justfile is the source of truth.
+# If you need to change what CI does, change the justfile — not this file.
+name: CI (macOS)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: extractions/setup-just@v2
+
+      # Pinned toolchain. MUST match rust-toolchain.toml channel exactly.
+      # Do NOT use @stable — it drifts between runs.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.0
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - run: just ci

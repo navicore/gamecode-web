@@ -1,25 +1,19 @@
 use anyhow::Result;
-use axum::{
-    Router,
-    extract::State,
-    http::{StatusCode, Method},
-    response::IntoResponse,
-    Json,
-};
+use axum::{http::Method, Router};
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::{
-    cors::{CorsLayer, Any},
+    cors::{Any, CorsLayer},
     services::ServeDir,
     trace::TraceLayer,
 };
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
+mod api;
 mod auth;
 mod config;
 mod error;
 mod providers;
-mod api;
 
 use config::Config;
 use providers::ProviderManager;
@@ -32,9 +26,7 @@ pub struct AppState {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
-    FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .init();
+    FmtSubscriber::builder().with_max_level(Level::INFO).init();
 
     info!("Starting GameCode Web server...");
 
@@ -63,7 +55,7 @@ async fn main() -> Result<()> {
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods([Method::GET, Method::POST])
-                .allow_headers(Any)
+                .allow_headers(Any),
         )
         .layer(TraceLayer::new_for_http())
         // Add state
@@ -73,7 +65,7 @@ async fn main() -> Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server.port));
     info!("Server listening on http://{}", addr);
     info!("Serve static files from: {}", config.server.static_dir);
-    
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 

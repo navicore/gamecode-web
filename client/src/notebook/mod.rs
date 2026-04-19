@@ -3,11 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub mod cell;
-pub mod renderer;
-pub mod parser;
-
-pub use cell::*;
-pub use renderer::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Notebook {
@@ -27,7 +22,7 @@ pub struct Cell {
     pub metadata: CellMetadata,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct CellMetadata {
     pub provider: Option<String>,
     pub model: Option<String>,
@@ -103,30 +98,6 @@ pub struct RenderedContent {
     pub error: Option<String>,
 }
 
-impl DiagramFormat {
-    pub fn from_language(lang: &str) -> Option<Self> {
-        match lang.to_lowercase().as_str() {
-            "dot" | "graphviz" => Some(DiagramFormat::Graphviz),
-            "plantuml" | "puml" => Some(DiagramFormat::PlantUML),
-            "mermaid" => Some(DiagramFormat::Mermaid),
-            "d2" => Some(DiagramFormat::D2),
-            "excalidraw" => Some(DiagramFormat::Excalidraw),
-            _ => None,
-        }
-    }
-    
-    pub fn file_extension(&self) -> &'static str {
-        match self {
-            DiagramFormat::Graphviz => "dot",
-            DiagramFormat::PlantUML => "puml",
-            DiagramFormat::Mermaid => "mmd",
-            DiagramFormat::D2 => "d2",
-            DiagramFormat::Excalidraw => "excalidraw",
-            DiagramFormat::Unknown(_) => "txt",
-        }
-    }
-}
-
 impl fmt::Display for DiagramFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -148,7 +119,7 @@ impl Notebook {
             active_input: String::new(),
         }
     }
-    
+
     pub fn add_cell(&mut self, content: CellContent) -> CellId {
         let id = CellId(self.cells.len());
         let cell = Cell {
@@ -160,18 +131,18 @@ impl Notebook {
         self.cells.push(cell);
         id
     }
-    
-    pub fn get_cell(&self, id: CellId) -> Option<&Cell> {
-        self.cells.get(id.0)
-    }
-    
+
     pub fn get_cell_mut(&mut self, id: CellId) -> Option<&mut Cell> {
         self.cells.get_mut(id.0)
     }
-    
+
     pub fn update_streaming_response(&mut self, id: CellId, text: &str) {
         if let Some(cell) = self.get_cell_mut(id) {
-            if let CellContent::TextResponse { text: content, streaming } = &mut cell.content {
+            if let CellContent::TextResponse {
+                text: content,
+                streaming,
+            } = &mut cell.content
+            {
                 // Trim leading whitespace on first chunk
                 if content.is_empty() && !text.trim_start().is_empty() {
                     content.push_str(text.trim_start());
@@ -182,34 +153,18 @@ impl Notebook {
             }
         }
     }
-    
+
     pub fn finalize_streaming_response(&mut self, id: CellId) {
         if let Some(cell) = self.get_cell_mut(id) {
-            if let CellContent::TextResponse { text: content, streaming } = &mut cell.content {
+            if let CellContent::TextResponse {
+                text: content,
+                streaming,
+            } = &mut cell.content
+            {
                 // Trim trailing whitespace when finalizing
                 *content = content.trim_end().to_string();
                 *streaming = false;
             }
-            // Trigger diagram detection after streaming completes
-            cell.detect_and_render_diagrams();
-        }
-    }
-}
-
-impl Cell {
-    fn detect_and_render_diagrams(&mut self) {
-        // This will be implemented to detect diagram code blocks
-        // and convert them to Diagram cells
-    }
-}
-
-impl Default for CellMetadata {
-    fn default() -> Self {
-        Self {
-            provider: None,
-            model: None,
-            hidden: false,
-            pinned: false,
         }
     }
 }

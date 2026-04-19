@@ -1,7 +1,6 @@
+use gloo_storage::{LocalStorage, Storage};
 use leptos::*;
 use serde::{Deserialize, Serialize};
-use gloo_storage::{LocalStorage, Storage};
-use chrono::Utc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthToken {
@@ -16,9 +15,7 @@ struct AuthResponse {
 }
 
 #[component]
-pub fn AuthForm<F>(
-    on_auth: F,
-) -> impl IntoView 
+pub fn AuthForm<F>(on_auth: F) -> impl IntoView
 where
     F: Fn(String) + Clone + 'static,
 {
@@ -30,7 +27,7 @@ where
         let on_auth = on_auth.clone();
         move |ev: leptos::ev::SubmitEvent| {
             ev.prevent_default();
-            
+
             let password_value = password.get();
             if password_value.is_empty() {
                 set_error.set(Some("Password cannot be empty".to_string()));
@@ -61,7 +58,7 @@ where
         <div class="auth-container">
             <form on:submit=handle_submit>
                 <h2>"GameCode Authentication"</h2>
-                
+
                 {move || error.get().map(|e| view! {
                     <div class="error-message">{e}</div>
                 })}
@@ -74,8 +71,8 @@ where
                     disabled=loading
                 />
 
-                <button 
-                    type="submit" 
+                <button
+                    type="submit"
                     disabled=loading
                 >
                     {move || if loading.get() { "Authenticating..." } else { "Login" }}
@@ -87,7 +84,7 @@ where
 
 async fn authenticate(password: &str) -> Result<AuthToken, String> {
     use gloo_net::http::Request;
-    
+
     #[derive(Serialize)]
     struct AuthRequest {
         password: String,
@@ -109,10 +106,10 @@ async fn authenticate(password: &str) -> Result<AuthToken, String> {
             .json()
             .await
             .map_err(|e| format!("Failed to parse response: {}", e))?;
-        
+
         // Calculate expires_at from expires_in
         let expires_at = chrono::Utc::now().timestamp() + auth_response.expires_in as i64;
-        
+
         Ok(AuthToken {
             token: auth_response.token,
             expires_at,
@@ -130,14 +127,14 @@ pub fn get_stored_token() -> Option<AuthToken> {
 }
 
 pub fn clear_auth_token() {
-    let _ = LocalStorage::delete("auth_token");
+    LocalStorage::delete("auth_token");
     // Note: We intentionally do NOT clear dropdown selections here
     // They should persist across login sessions
 }
 
 pub fn is_token_valid(token: &AuthToken) -> bool {
     use chrono::Utc;
-    
+
     let now = Utc::now().timestamp();
     token.expires_at > now
 }

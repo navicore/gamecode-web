@@ -1,10 +1,8 @@
 use leptos::*;
-use pulldown_cmark::{Parser, Event, Tag, TagEnd, CodeBlockKind, HeadingLevel};
-use syntect::parsing::SyntaxSet;
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
 use syntect::highlighting::ThemeSet;
 use syntect::html::highlighted_html_for_string;
-use wasm_bindgen::prelude::*;
-use web_sys::window;
+use syntect::parsing::SyntaxSet;
 
 #[component]
 pub fn MarkdownRenderer(text: String) -> impl IntoView {
@@ -15,11 +13,11 @@ pub fn MarkdownRenderer(text: String) -> impl IntoView {
     let mut code_block_lang = String::new();
     let mut code_block_id = 0;
     let mut current_heading_level = None;
-    
+
     let syntax_set = SyntaxSet::load_defaults_newlines();
     let theme_set = ThemeSet::load_defaults();
     let theme = &theme_set.themes["base16-ocean.dark"];
-    
+
     for event in parser {
         match event {
             Event::Start(Tag::CodeBlock(kind)) => {
@@ -33,20 +31,20 @@ pub fn MarkdownRenderer(text: String) -> impl IntoView {
             Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
                 code_block_id += 1;
-                
-                let syntax = syntax_set.find_syntax_by_token(&code_block_lang)
+
+                let syntax = syntax_set
+                    .find_syntax_by_token(&code_block_lang)
                     .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
-                
-                let highlighted = highlighted_html_for_string(
-                    &code_block_content,
-                    &syntax_set,
-                    syntax,
-                    theme,
-                ).unwrap_or_else(|_| {
-                    format!("<pre><code>{}</code></pre>", 
-                        html_escape::encode_text(&code_block_content))
-                });
-                
+
+                let highlighted =
+                    highlighted_html_for_string(&code_block_content, &syntax_set, syntax, theme)
+                        .unwrap_or_else(|_| {
+                            format!(
+                                "<pre><code>{}</code></pre>",
+                                html_escape::encode_text(&code_block_content)
+                            )
+                        });
+
                 html_output.push_str(&format!(
                     r#"<div class="code-block-wrapper">
                         <div class="code-block-header">
@@ -70,7 +68,7 @@ pub fn MarkdownRenderer(text: String) -> impl IntoView {
                     html_escape::encode_double_quoted_attribute(&code_block_content),
                     highlighted
                 ));
-                
+
                 code_block_content.clear();
             }
             Event::Text(text) if in_code_block => {
@@ -146,7 +144,9 @@ pub fn MarkdownRenderer(text: String) -> impl IntoView {
             Event::End(TagEnd::Item) => {
                 html_output.push_str("</li>");
             }
-            Event::Start(Tag::Link { dest_url, title, .. }) => {
+            Event::Start(Tag::Link {
+                dest_url, title, ..
+            }) => {
                 html_output.push_str(&format!(
                     r#"<a href="{}" title="{}" target="_blank" rel="noopener">"#,
                     html_escape::encode_double_quoted_attribute(&dest_url),
@@ -166,7 +166,7 @@ pub fn MarkdownRenderer(text: String) -> impl IntoView {
                 html_output.push_str("<br>");
             }
             Event::SoftBreak => {
-                html_output.push_str(" ");
+                html_output.push(' ');
             }
             Event::Rule => {
                 html_output.push_str("<hr>");
@@ -177,7 +177,7 @@ pub fn MarkdownRenderer(text: String) -> impl IntoView {
             _ => {}
         }
     }
-    
+
     view! {
         <div class="markdown-content">
             <div inner_html=html_output></div>
@@ -206,17 +206,4 @@ pub fn MarkdownRenderer(text: String) -> impl IntoView {
             </script>
         </div>
     }
-}
-
-pub fn copy_to_clipboard(text: &str) -> Result<(), JsValue> {
-    let window = window().ok_or_else(|| JsValue::from_str("No window found"))?;
-    let navigator = window.navigator();
-    let clipboard = navigator.clipboard();
-    
-    let promise = clipboard.write_text(text);
-    wasm_bindgen_futures::spawn_local(async move {
-        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-    });
-    
-    Ok(())
 }

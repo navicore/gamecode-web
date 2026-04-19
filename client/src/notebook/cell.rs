@@ -1,5 +1,5 @@
+use crate::notebook::{Cell, CellContent};
 use leptos::*;
-use crate::notebook::{Cell, CellContent, DiagramFormat};
 
 #[component]
 pub fn CellView(cell: Cell) -> impl IntoView {
@@ -13,7 +13,7 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
+
         CellContent::TextResponse { text, streaming } => {
             view! {
                 <div class="cell cell-response">
@@ -31,8 +31,12 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
-        CellContent::Code { language, source, rendered } => {
+
+        CellContent::Code {
+            language,
+            source,
+            rendered,
+        } => {
             view! {
                 <div class="cell cell-code">
                     <div class="cell-header">
@@ -63,10 +67,14 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
-        CellContent::Diagram { format, source, rendered } => {
+
+        CellContent::Diagram {
+            format,
+            source,
+            rendered,
+        } => {
             let (show_source, set_show_source) = create_signal(false);
-            
+
             view! {
                 <div class="cell cell-diagram">
                     <div class="cell-header">
@@ -83,7 +91,7 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                             </button>
                         </div>
                     </div>
-                    
+
                     {move || if show_source.get() {
                         view! {
                             <pre class="diagram-source">
@@ -93,7 +101,7 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                     } else {
                         view! { <div></div> }.into_view()
                     }}
-                    
+
                     <div class="diagram-container">
                         {if let Some(r) = rendered {
                             if let Some(svg) = r.svg {
@@ -110,12 +118,16 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
-        CellContent::Image { url, alt, dimensions } => {
+
+        CellContent::Image {
+            url,
+            alt,
+            dimensions,
+        } => {
             view! {
                 <div class="cell cell-image">
-                    <img 
-                        src=url 
+                    <img
+                        src=url
                         alt=alt
                         class="cell-image-content"
                         style=dimensions.map(|(w, h)| format!("max-width: {}px; max-height: {}px", w, h))
@@ -123,7 +135,7 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
+
         CellContent::Table { headers, rows } => {
             view! {
                 <div class="cell cell-table">
@@ -146,7 +158,7 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
+
         CellContent::Error { message, details } => {
             view! {
                 <div class="cell cell-error">
@@ -155,7 +167,7 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
+
         CellContent::Loading { message } => {
             view! {
                 <div class="cell cell-loading">
@@ -164,8 +176,8 @@ pub fn CellView(cell: Cell) -> impl IntoView {
                 </div>
             }
         }
-        
-        _ => view! { <div class="cell">"Unsupported cell type"</div> }
+
+        _ => view! { <div class="cell">"Unsupported cell type"</div> },
     }
 }
 
@@ -179,14 +191,14 @@ fn Markdown(text: String) -> impl IntoView {
 
 fn format_timestamp(dt: &chrono::DateTime<chrono::Utc>) -> String {
     use chrono::{Local, TimeZone};
-    
+
     // Convert UTC to local time
     let local_dt = Local.from_utc_datetime(&dt.naive_utc());
-    
+
     // Format based on how recent the timestamp is
     let now = Local::now();
     let duration = now.signed_duration_since(local_dt);
-    
+
     if duration.num_days() == 0 {
         // Today - just show time
         local_dt.format("%H:%M:%S").to_string()
@@ -208,9 +220,7 @@ fn copy_to_clipboard(text: &str) {
         let clipboard = navigator.clipboard();
         let text = text.to_string();
         spawn_local(async move {
-            let _ = wasm_bindgen_futures::JsFuture::from(
-                clipboard.write_text(&text)
-            ).await;
+            let _ = wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&text)).await;
         });
     }
 }
