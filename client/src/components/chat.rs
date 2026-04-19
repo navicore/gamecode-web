@@ -175,6 +175,12 @@ where
                 context_manager.restore_state(stored.context_state);
                 set_notebook.update(|nb| *nb = stored.notebook);
                 set_created_at.set(stored.metadata.created_at);
+                if !stored.metadata.provider.is_empty() {
+                    selected_provider.set(stored.metadata.provider);
+                }
+                if !stored.metadata.model.is_empty() {
+                    selected_model.set(stored.metadata.model);
+                }
             }
         }
     });
@@ -447,6 +453,12 @@ where
             cm_for_sel.restore_state(stored.context_state);
             set_notebook.update(|nb| *nb = stored.notebook);
             set_created_at.set(stored.metadata.created_at);
+            if !stored.metadata.provider.is_empty() {
+                selected_provider.set(stored.metadata.provider);
+            }
+            if !stored.metadata.model.is_empty() {
+                selected_model.set(stored.metadata.model);
+            }
         }
     });
 
@@ -522,7 +534,7 @@ where
                                     providers=providers.read_only()
                                     selected_provider=selected_provider
                                     selected_model=selected_model
-                                    disabled=has_messages.into()
+                                    disabled=is_streaming.into()
                                 />
                                 <PersonaPicker
                                     prompts=system_prompts.read_only()
