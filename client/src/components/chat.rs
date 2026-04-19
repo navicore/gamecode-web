@@ -296,9 +296,6 @@ where
         move |_| {
             let nb = notebook.get();
             let _ = context_manager.get_total_tokens();
-            if nb.cells.is_empty() {
-                return;
-            }
             let title = nb
                 .cells
                 .iter()
@@ -315,7 +312,7 @@ where
                         truncated
                     }
                 })
-                .unwrap_or_else(|| "New Conversation".into());
+                .unwrap_or_else(|| "new".into());
 
             let metadata = ConversationMetadata {
                 created_at: created_at.get(),
