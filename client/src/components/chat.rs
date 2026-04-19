@@ -403,7 +403,7 @@ where
         }
     });
 
-    let has_messages = Signal::derive(move || {
+    let has_messages = create_memo(move |_| {
         notebook.get().cells.iter().any(|c| {
             matches!(
                 &c.content,
@@ -522,7 +522,7 @@ where
                                     providers=providers.read_only()
                                     selected_provider=selected_provider
                                     selected_model=selected_model
-                                    disabled=has_messages
+                                    disabled=has_messages.into()
                                 />
                                 <PersonaPicker
                                     prompts=system_prompts.read_only()
