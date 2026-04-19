@@ -37,7 +37,7 @@ pub struct ProvidersConfig {
 pub struct OllamaConfig {
     pub enabled: bool,
     pub base_url: String,
-    pub default_model: String,
+    pub default_model: Option<String>,
     pub timeout_seconds: u64,
 }
 
@@ -65,7 +65,8 @@ impl Config {
                 base_url: env::var("GAMECODE_OLLAMA_BASE_URL")
                     .context("GAMECODE_OLLAMA_BASE_URL must be set when ollama is enabled")?,
                 default_model: env::var("GAMECODE_OLLAMA_DEFAULT_MODEL")
-                    .context("GAMECODE_OLLAMA_DEFAULT_MODEL must be set when ollama is enabled")?,
+                    .ok()
+                    .filter(|v| !v.is_empty()),
                 timeout_seconds: parse_env("GAMECODE_OLLAMA_TIMEOUT_SECONDS", 60u64),
             })
         } else {

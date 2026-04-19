@@ -8,6 +8,11 @@
 #   - client/: wasm32-unknown-unknown bundle (leptos, built via trunk)
 # Native cargo commands target server only; client goes through trunk.
 
+# Auto-load .env from the invocation dir so `just dev`/`run`/`watch` inherit
+# GAMECODE_* creds without a wrapper. Missing file is fine. The server still
+# fails fast via Config::load() if a required var is unset.
+set dotenv-load := true
+
 # Default recipe: show available recipes
 default:
     @just --list
@@ -47,6 +52,27 @@ build-client:
 # This is what developers should run before pushing.
 ci: fmt-check lint test build
     @echo "Safe to push to GitHub - CI will pass."
+
+# Debug build of the client + run the server (reads env from the shell)
+dev:
+    cd client && trunk build
+    cargo run -p gamecode-server --bin gamecode-server
+
+# Release build of everything, then run the server
+run: build
+    cargo run --release -p gamecode-server --bin gamecode-server
+
+# Debug client build once, then server auto-reloads on source changes.
+# Requires `cargo install cargo-watch`.
+watch:
+    cd client && trunk build
+    cargo watch -x 'run -p gamecode-server --bin gamecode-server'
+
+# Install dev tooling (wasm target, trunk, cargo-watch)
+install-deps:
+    rustup target add wasm32-unknown-unknown
+    cargo install trunk
+    cargo install cargo-watch
 
 # Remove build artifacts
 clean:
