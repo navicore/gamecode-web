@@ -3,7 +3,7 @@ use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHasher,
 };
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, Rng};
 use std::env;
 use tracing::warn;
 
@@ -98,7 +98,7 @@ fn hash_password(plaintext: &str) -> Result<String> {
 }
 
 fn generate_random_secret(len: usize) -> String {
-    rand::thread_rng()
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(len)
         .map(char::from)

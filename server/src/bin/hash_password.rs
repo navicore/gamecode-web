@@ -1,5 +1,5 @@
 use argon2::{
-    password_hash::{PasswordHasher, SaltString},
+    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Argon2,
 };
 
@@ -8,7 +8,7 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "gamecode".to_string());
 
-    let salt = SaltString::generate(&mut rand::thread_rng());
+    let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
     match argon2.hash_password(password.as_bytes(), &salt) {
