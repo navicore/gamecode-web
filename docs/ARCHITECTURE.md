@@ -35,7 +35,7 @@ The server is the only system with outbound calls: the browser talks only to the
 
 **Root**
 - `build.rs` — invokes `trunk build --release` in `client/` when the root crate is built; the root `src/main.rs` is a vestigial stub.
-- `Makefile` — canonical build/run entry points (`build`, `run`, `dev`, `watch`, `docker-build`).
+- `justfile` — canonical build/run entry points (`just ci`, `just dev`, `just run`, `just watch`, `just build`).
 - `Dockerfile` — multi-stage: `rust:1.88` builder installs trunk + wasm target, builds client then server; runtime is `debian:bookworm-slim` running as non-root `gamecode` user on port 8080.
 - `.github/workflows/docker-build.yml` — CI image build; deployment is Flux GitOps from another repo.
 

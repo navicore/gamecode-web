@@ -96,9 +96,13 @@ impl InferenceProvider for OllamaProvider {
     async fn chat(&self, request: ChatRequest) -> Result<ChatStream> {
         let model = request
             .model
-            .as_ref()
-            .unwrap_or(&self.config.default_model)
-            .to_string();
+            .clone()
+            .or_else(|| self.config.default_model.clone())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no model specified in request and GAMECODE_OLLAMA_DEFAULT_MODEL is unset"
+                )
+            })?;
 
         tracing::info!("Ollama chat request for model: {}", model);
 

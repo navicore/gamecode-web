@@ -1,16 +1,105 @@
 use crate::api::{ApiClient, ChatMessage, ChatRequest, ProviderInfo, SystemPrompt};
-use crate::components::context_manager::{ContextDisplay, ContextManager};
-use crate::components::resize_handle::ResizeHandle;
+use crate::components::composer::Composer;
+use crate::components::context_manager::ContextManager;
+use crate::components::empty_state::EmptyState;
+use crate::components::model_picker::ModelPicker;
+use crate::components::persona_picker::PersonaPicker;
+use crate::components::sidebar::Sidebar;
+use crate::components::sidebar_resize::{load_saved_width, SidebarResize};
+use crate::notebook::cell::{CellContext, CellView};
 use crate::notebook::{CellContent, CellId, Notebook};
 use crate::simple_storage::SimpleStorage;
 use crate::storage::{ConversationMetadata, StoredConversation};
-use chrono::{Local, TimeZone, Utc};
+use chrono::Utc;
 use leptos::html::Div;
 use leptos::*;
 use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
-use web_sys::KeyboardEvent;
+
+fn user_name_from_token(token: &str) -> String {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return "friend".into();
+    }
+    let payload_b64 = parts[1];
+    let padded = match payload_b64.len() % 4 {
+        0 => payload_b64.to_string(),
+        r => format!("{}{}", payload_b64, "=".repeat(4 - r)),
+    };
+    let bytes = match base64_url_decode(&padded) {
+        Some(b) => b,
+        None => return "friend".into(),
+    };
+    let s = match std::str::from_utf8(&bytes) {
+        Ok(s) => s,
+        Err(_) => return "friend".into(),
+    };
+    serde_json::from_str::<serde_json::Value>(s)
+        .ok()
+        .and_then(|v| v.get("sub").and_then(|x| x.as_str()).map(|x| x.to_string()))
+        .unwrap_or_else(|| "friend".into())
+}
+
+fn base64_url_decode(s: &str) -> Option<Vec<u8>> {
+    let std = s.replace('-', "+").replace('_', "/");
+    base64_decode(&std)
+}
+
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    const TBL: [i8; 128] = {
+        let mut t = [-1i8; 128];
+        let mut i = 0u8;
+        while i < 26 {
+            t[(b'A' + i) as usize] = i as i8;
+            t[(b'a' + i) as usize] = (i + 26) as i8;
+            i += 1;
+        }
+        let mut j = 0u8;
+        while j < 10 {
+            t[(b'0' + j) as usize] = (j + 52) as i8;
+            j += 1;
+        }
+        t[b'+' as usize] = 62;
+        t[b'/' as usize] = 63;
+        t
+    };
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let bytes = s.as_bytes();
+    let mut buf: u32 = 0;
+    let mut bits = 0u32;
+    for &b in bytes {
+        if b == b'=' {
+            break;
+        }
+        if (b as usize) >= TBL.len() {
+            return None;
+        }
+        let v = TBL[b as usize];
+        if v < 0 {
+            return None;
+        }
+        buf = (buf << 6) | (v as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buf >> bits) & 0xFF) as u8);
+        }
+    }
+    Some(out)
+}
+
+fn read_local(key: &str) -> Option<String> {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(key).ok().flatten())
+}
+
+fn write_local(key: &str, value: &str) {
+    if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = s.set_item(key, value);
+    }
+}
 
 #[component]
 pub fn Chat<F, G>(token: String, on_auth_error: F, on_logout: G) -> impl IntoView
@@ -18,435 +107,213 @@ where
     F: Fn() + Clone + 'static,
     G: Fn() + Clone + 'static,
 {
+    let user_label = user_name_from_token(&token);
     let token = create_rw_signal(token);
     let (notebook, set_notebook) = create_signal(Notebook::new());
     let (auth_error_triggered, set_auth_error_triggered) = create_signal(false);
 
-    // Load saved preferences from localStorage
-    let window = web_sys::window().unwrap();
-    let storage = window.local_storage().unwrap().unwrap();
-
-    let saved_provider = storage
-        .get_item("selected_provider")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let saved_model = storage
-        .get_item("selected_model")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let saved_prompt = storage
-        .get_item("selected_prompt")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "General Assistant".to_string());
-    let saved_custom = storage
-        .get_item("custom_prompt")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let saved_input = storage
-        .get_item("pending_input")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let saved_temperature = storage
-        .get_item("temperature")
-        .ok()
-        .flatten()
+    let saved_provider = read_local("selected_provider").unwrap_or_default();
+    let saved_model = read_local("selected_model").unwrap_or_default();
+    let saved_prompt =
+        read_local("selected_prompt").unwrap_or_else(|| "General Assistant".to_string());
+    let saved_custom = read_local("custom_prompt").unwrap_or_default();
+    let saved_input = read_local("pending_input").unwrap_or_default();
+    let saved_temp = read_local("temperature")
         .and_then(|s| s.parse::<f32>().ok())
         .unwrap_or(0.7);
+    let saved_theme = read_local("gc_theme").unwrap_or_else(|| "light".to_string());
 
-    // Debug log
-    web_sys::console::log_1(
-        &format!(
-            "Component init - localStorage - Provider: '{}', Model: '{}', Prompt: '{}'",
-            &saved_provider, &saved_model, &saved_prompt
-        )
-        .into(),
-    );
-
-    let (providers, set_providers) = create_signal(Vec::<ProviderInfo>::new());
-    let (selected_provider, set_selected_provider) = create_signal(saved_provider);
-    let (selected_model, set_selected_model) = create_signal(saved_model);
-    let (system_prompts, set_system_prompts) = create_signal(Vec::<SystemPrompt>::new());
-    let (selected_prompt_name, set_selected_prompt_name) = create_signal(saved_prompt);
-    let (custom_prompt, set_custom_prompt) = create_signal(saved_custom);
-    let (temperature, set_temperature) = create_signal(saved_temperature);
-    let (input_value, set_input_value) = create_signal(saved_input.clone());
+    let providers = create_rw_signal(Vec::<ProviderInfo>::new());
+    let selected_provider = create_rw_signal(saved_provider);
+    let selected_model = create_rw_signal(saved_model);
+    let system_prompts = create_rw_signal(Vec::<SystemPrompt>::new());
+    let selected_prompt_name = create_rw_signal(saved_prompt);
+    let custom_prompt = create_rw_signal(saved_custom);
+    let temperature = create_rw_signal(saved_temp);
+    let input_value = create_rw_signal(saved_input.clone());
     let (is_streaming, set_is_streaming) = create_signal(false);
     let (should_submit, set_should_submit) = create_signal(false);
-    let (provider_manually_changed, set_provider_manually_changed) = create_signal(false);
     let (providers_loaded, set_providers_loaded) = create_signal(false);
     let (initial_load_complete, set_initial_load_complete) = create_signal(false);
-    let (has_messages, set_has_messages) = create_signal(false);
+    let sidebar_width = create_rw_signal(load_saved_width());
+    let theme = create_rw_signal(saved_theme);
+    let search_query = create_rw_signal(String::new());
 
-    // Clear saved input after loading
     if !saved_input.is_empty() {
-        let _ = storage.remove_item("pending_input");
+        if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+            let _ = s.remove_item("pending_input");
+        }
     }
 
-    let notebook_ref = create_node_ref::<Div>();
+    let thread_ref = create_node_ref::<Div>();
 
-    // Create or restore conversation ID
-    let (conversation_id, set_conversation_id) = create_signal(
-        storage
-            .get_item("current_conversation_id")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| {
-                let new_id = Uuid::new_v4().to_string();
-                let _ = storage.set_item("current_conversation_id", &new_id);
-                new_id
-            }),
-    );
+    let (conversation_id, set_conversation_id) =
+        create_signal(read_local("current_conversation_id").unwrap_or_else(|| {
+            let new_id = Uuid::new_v4().to_string();
+            write_local("current_conversation_id", &new_id);
+            new_id
+        }));
 
-    // Create context manager
     let context_manager = ContextManager::new();
     let simple_storage = SimpleStorage::new();
     let (created_at, set_created_at) = create_signal(Utc::now());
     let (conversations, set_conversations) =
         create_signal(Vec::<crate::storage::ConversationRef>::new());
-    let (show_conversation_dropdown, set_show_conversation_dropdown) = create_signal(false);
 
-    // Handle auth errors
     create_effect(move |_| {
         if auth_error_triggered.get() {
             on_auth_error();
         }
     });
 
-    // Setup click outside handler for dropdown
-    create_effect(move |_| {
-        if show_conversation_dropdown.get() {
-            // Add a small delay to prevent immediate closing when opening
-            if let Some(window) = web_sys::window() {
-                let closure = Closure::once(move || {
-                    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                        let handle_click = Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
-                            if let Some(target) = e.target() {
-                                if let Ok(element) = target.dyn_into::<web_sys::Element>() {
-                                    // Check if click is outside the dropdown area
-                                    if element
-                                        .closest(".dropdown-wrapper")
-                                        .unwrap_or(None)
-                                        .is_none()
-                                    {
-                                        set_show_conversation_dropdown.set(false);
-                                    }
-                                }
-                            }
-                        })
-                            as Box<dyn FnMut(_)>);
-
-                        let _ = document.add_event_listener_with_callback(
-                            "click",
-                            handle_click.as_ref().unchecked_ref(),
-                        );
-                        handle_click.forget();
-                    }
-                });
-
-                let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                    closure.as_ref().unchecked_ref(),
-                    10,
-                );
-                closure.forget();
-            }
-        }
-    });
-
-    // Load existing conversation on mount
     create_effect({
         let context_manager = context_manager.clone();
         let simple_storage = simple_storage.clone();
         move |_| {
             let current_id = conversation_id.get();
-            web_sys::console::log_1(&"Loading conversation from localStorage...".into());
-
-            // Try to load existing conversation
             if let Ok(Some(stored)) = simple_storage.load_conversation(&current_id) {
-                web_sys::console::log_1(
-                    &format!(
-                        "Loaded conversation {} with {} cells",
-                        current_id,
-                        stored.notebook.cells.len()
-                    )
-                    .into(),
-                );
-
-                // Restore the context state
                 context_manager.restore_state(stored.context_state);
-
-                // Check if conversation has messages before moving notebook
-                let has_msgs = stored.notebook.cells.iter().any(|cell| {
-                    matches!(
-                        &cell.content,
-                        CellContent::UserInput { .. } | CellContent::TextResponse { .. }
-                    )
-                });
-                set_has_messages.set(has_msgs);
-
-                // Update notebook with stored cells
-                set_notebook.update(|nb| {
-                    *nb = stored.notebook;
-                });
-
-                // Restore created time
+                set_notebook.update(|nb| *nb = stored.notebook);
                 set_created_at.set(stored.metadata.created_at);
-
-                web_sys::console::log_1(&"Conversation restored successfully".into());
-            } else {
-                web_sys::console::log_1(
-                    &format!("No existing conversation found for ID: {}", current_id).into(),
-                );
             }
         }
     });
 
-    // Load conversations list
     create_effect({
         let simple_storage = simple_storage.clone();
         move |_| {
-            if let Ok(conv_list) = simple_storage.list_conversations(20) {
-                set_conversations.set(conv_list);
+            if let Ok(list) = simple_storage.list_conversations(50) {
+                set_conversations.set(list);
             }
         }
     });
 
     // Load providers and prompts on mount
     create_effect(move |_| {
-        let token = token.get();
+        let tk = token.get();
         spawn_local(async move {
             let client = ApiClient::new();
-
-            // Load providers
-            match client.list_providers(&token).await {
-                Ok(response) => {
-                    let providers = response.providers;
-                    set_providers.set(providers.clone());
-
-                    if !initial_load_complete.get() {
-                        let current_provider = selected_provider.get();
-                        let current_model = selected_model.get();
-
-                        web_sys::console::log_1(
-                            &format!(
-                                "Providers loaded. Current signals - Provider: '{}', Model: '{}'",
-                                &current_provider, &current_model
-                            )
-                            .into(),
-                        );
-
-                        // Only set defaults if we have absolutely nothing saved
-                        if current_provider.is_empty() && current_model.is_empty() {
-                            // No saved values at all, use first provider
-                            if let Some(first) = providers.first() {
-                                web_sys::console::log_1(
-                                    &"No saved values, setting first provider as default".into(),
-                                );
-                                set_selected_provider.set(first.name.clone());
-                                if let Some(first_model) = first.models.first() {
-                                    set_selected_model.set(first_model.clone());
+            match client.list_providers(&tk).await {
+                Ok(resp) => {
+                    let list = resp.providers;
+                    providers.set(list.clone());
+                    if !initial_load_complete.get_untracked() {
+                        let cp = selected_provider.get_untracked();
+                        let cm = selected_model.get_untracked();
+                        if cp.is_empty() && cm.is_empty() {
+                            if let Some(first) = list.first() {
+                                selected_provider.set(first.name.clone());
+                                if let Some(m) = first.models.first() {
+                                    selected_model.set(m.clone());
                                 }
                             }
                         }
-                        // If we have a saved provider/model, trust it and don't change anything
-                        // The UI will handle invalid selections
-
                         set_initial_load_complete.set(true);
                     }
-
                     set_providers_loaded.set(true);
                 }
-                Err(crate::api::ApiError::Unauthorized) => {
-                    set_auth_error_triggered.set(true);
-                }
+                Err(crate::api::ApiError::Unauthorized) => set_auth_error_triggered.set(true),
                 Err(e) => {
-                    web_sys::console::error_1(&format!("Failed to load providers: {}", e).into());
+                    web_sys::console::error_1(&format!("providers: {}", e).into());
                 }
             }
-
-            // Load prompts
-            match client.list_prompts(&token).await {
-                Ok(response) => {
-                    set_system_prompts.set(response.prompts);
-                }
-                Err(crate::api::ApiError::Unauthorized) => {
-                    set_auth_error_triggered.set(true);
-                }
+            match client.list_prompts(&tk).await {
+                Ok(resp) => system_prompts.set(resp.prompts),
+                Err(crate::api::ApiError::Unauthorized) => set_auth_error_triggered.set(true),
                 Err(e) => {
-                    web_sys::console::error_1(&format!("Failed to load prompts: {}", e).into());
+                    web_sys::console::error_1(&format!("prompts: {}", e).into());
                 }
             }
         });
     });
 
-    // Save provider selection when it changes
+    // Persist selections
     create_effect(move |_| {
-        let provider = selected_provider.get();
-        // Only save after initial load is complete to avoid overwriting saved values
-        if initial_load_complete.get() && !provider.is_empty() {
-            web_sys::console::log_1(
-                &format!("Saving provider to localStorage: {}", &provider).into(),
-            );
-            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                let _ = storage.set_item("selected_provider", &provider);
-            }
+        let v = selected_provider.get();
+        if initial_load_complete.get() && !v.is_empty() {
+            write_local("selected_provider", &v);
+        }
+    });
+    create_effect(move |_| {
+        let v = selected_model.get();
+        if initial_load_complete.get() && !v.is_empty() {
+            write_local("selected_model", &v);
+        }
+    });
+    create_effect(move |_| {
+        let v = selected_prompt_name.get();
+        if initial_load_complete.get() {
+            write_local("selected_prompt", &v);
+        }
+    });
+    create_effect(move |_| {
+        let v = custom_prompt.get();
+        if initial_load_complete.get() {
+            write_local("custom_prompt", &v);
+        }
+    });
+    create_effect(move |_| {
+        let v = temperature.get();
+        if initial_load_complete.get() {
+            write_local("temperature", &v.to_string());
         }
     });
 
-    // Update model when provider is manually changed
+    // When a new provider is selected, if current model isn't in its list, pick first
     create_effect(move |_| {
-        if provider_manually_changed.get() {
-            let provider = selected_provider.get();
-            let all_providers = providers.get();
-
-            if let Some(provider_info) = all_providers.iter().find(|p| p.name == provider) {
-                if let Some(first_model) = provider_info.models.first() {
-                    set_selected_model.set(first_model.clone());
+        let p = selected_provider.get();
+        let all = providers.get();
+        if let Some(info) = all.iter().find(|x| x.name == p) {
+            let cm = selected_model.get_untracked();
+            if !info.models.iter().any(|m| m == &cm) {
+                if let Some(m) = info.models.first() {
+                    selected_model.set(m.clone());
                 }
             }
-            set_provider_manually_changed.set(false);
         }
     });
 
-    // Update system prompt when model changes
-    create_effect(move |_| {
-        let model = selected_model.get();
-        let prompts = system_prompts.get();
-
-        // Save to localStorage (only after initial load is complete)
-        if !model.is_empty() && initial_load_complete.get() {
-            web_sys::console::log_1(&format!("Saving model to localStorage: {}", &model).into());
-            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                let _ = storage.set_item("selected_model", &model);
-            }
-        }
-
-        // Only auto-select prompt if user hasn't already chosen one
-        if selected_prompt_name.get() == "General Assistant" {
-            // Find a prompt that suggests this model
-            let matching_prompt = prompts
-                .iter()
-                .find(|p| p.suggested_models.iter().any(|m| m.contains(&model)))
-                .or_else(|| prompts.iter().find(|p| p.name == "General Assistant"));
-
-            if let Some(prompt) = matching_prompt {
-                set_selected_prompt_name.set(prompt.name.clone());
-            }
-        }
-    });
-
-    // Save prompt selection changes
-    create_effect(move |_| {
-        let prompt_name = selected_prompt_name.get();
-        if initial_load_complete.get() {
-            web_sys::console::log_1(
-                &format!("Saving prompt to localStorage: {}", &prompt_name).into(),
-            );
-            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                let _ = storage.set_item("selected_prompt", &prompt_name);
-            }
-        }
-    });
-
-    // Save custom prompt changes
-    create_effect(move |_| {
-        let custom = custom_prompt.get();
-        if initial_load_complete.get() {
-            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                let _ = storage.set_item("custom_prompt", &custom);
-            }
-        }
-    });
-
-    // Save temperature changes
-    create_effect(move |_| {
-        let temp = temperature.get();
-        if initial_load_complete.get() {
-            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                let _ = storage.set_item("temperature", &temp.to_string());
-            }
-        }
-    });
-
-    // Helper function to scroll to bottom
     let scroll_to_bottom = move || {
-        if let Some(element) = notebook_ref.get() {
-            // Use web_sys to ensure proper scrolling
-            if let Some(window) = web_sys::window() {
-                let el = element.clone();
-                let closure = Closure::once(move || {
-                    el.set_scroll_top(el.scroll_height());
-                });
-                let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
+        if let Some(el) = thread_ref.get_untracked() {
+            if let Some(win) = web_sys::window() {
+                let el2 = el.clone();
+                let closure = Closure::once(move || el2.set_scroll_top(el2.scroll_height()));
+                let _ = win.request_animation_frame(closure.as_ref().unchecked_ref());
                 closure.forget();
             }
         }
     };
 
-    // Auto-scroll to bottom when notebook changes
     create_effect(move |_| {
-        let nb = notebook.get(); // Subscribe to changes
-
-        // Update has_messages based on notebook content
-        let has_msgs = nb.cells.iter().any(|cell| {
-            matches!(
-                &cell.content,
-                CellContent::UserInput { .. } | CellContent::TextResponse { .. }
-            )
-        });
-        set_has_messages.set(has_msgs);
-
+        let _ = notebook.get();
         scroll_to_bottom();
     });
 
-    // Save conversation when notebook or context changes
+    // Save conversation when notebook changes
     create_effect({
         let context_manager = context_manager.clone();
         let simple_storage = simple_storage.clone();
         move |_| {
-            let notebook_value = notebook.get();
-
-            // Also subscribe to context changes
+            let nb = notebook.get();
             let _ = context_manager.get_total_tokens();
-
-            // Skip if no content
-            if notebook_value.cells.is_empty() {
-                return;
-            }
-
-            web_sys::console::log_1(
-                &format!(
-                    "Save effect - preparing to save {} cells",
-                    notebook_value.cells.len()
-                )
-                .into(),
-            );
-
-            // Generate title from first user message
-            let title = notebook_value
+            let title = nb
                 .cells
                 .iter()
-                .find_map(|cell| match &cell.content {
-                    crate::notebook::CellContent::UserInput { text } => Some(text.clone()),
+                .find_map(|c| match &c.content {
+                    CellContent::UserInput { text } => Some(text.clone()),
                     _ => None,
                 })
-                .map(|text| {
-                    // Take first 40 chars or up to first newline
-                    let title_text = text.lines().next().unwrap_or(&text);
-                    let truncated = title_text.chars().take(40).collect::<String>();
-                    if title_text.len() > 40 {
-                        truncated + "..."
+                .map(|t| {
+                    let line = t.lines().next().unwrap_or(&t);
+                    let truncated = line.chars().take(40).collect::<String>();
+                    if line.len() > 40 {
+                        format!("{}...", truncated)
                     } else {
                         truncated
                     }
                 })
-                .unwrap_or_else(|| "New Conversation".to_string());
+                .unwrap_or_else(|| "new".into());
 
-            // Create metadata
             let metadata = ConversationMetadata {
                 created_at: created_at.get(),
                 modified_at: Utc::now(),
@@ -454,100 +321,45 @@ where
                 model: selected_model.get(),
                 provider: selected_provider.get(),
             };
-
-            // Create stored conversation
             let stored = StoredConversation {
                 id: conversation_id.get(),
-                notebook: notebook_value,
+                notebook: nb,
                 context_state: context_manager.to_state(),
                 metadata,
             };
-
-            web_sys::console::log_1(
-                &format!("Saving conversation {}", conversation_id.get()).into(),
-            );
-
-            // Save synchronously
-            match simple_storage.save_conversation(&stored) {
-                Ok(_) => {
-                    web_sys::console::log_1(
-                        &format!("✅ Conversation {} saved successfully", stored.id).into(),
-                    );
-                    // Refresh conversation list
-                    if let Ok(conv_list) = simple_storage.list_conversations(20) {
-                        set_conversations.set(conv_list);
-                    }
+            if simple_storage.save_conversation(&stored).is_ok() {
+                if let Ok(list) = simple_storage.list_conversations(50) {
+                    set_conversations.set(list);
                 }
-                Err(e) => web_sys::console::error_1(
-                    &format!("❌ Failed to save conversation: {:?}", e).into(),
-                ),
             }
         }
     });
 
-    // Handle message submission when triggered
     create_effect({
         let context_manager = context_manager.clone();
         move |_| {
             if !should_submit.get() {
                 return;
             }
-
-            // Reset the trigger
             set_should_submit.set(false);
-
-            web_sys::console::log_1(&"submit_message called".into());
             let message = input_value.get();
-            if message.trim().is_empty() || is_streaming.get() {
-                web_sys::console::log_1(&"Message empty or already streaming".into());
+            if message.trim().is_empty() || is_streaming.get_untracked() {
                 return;
             }
-            web_sys::console::log_1(&format!("Submitting message: {}", message).into());
-
-            // Add user input cell
             set_notebook.update(|nb| {
                 nb.add_cell(CellContent::UserInput {
                     text: message.clone(),
                 });
             });
-
-            // Add message to context
-            let user_msg = ChatMessage {
-                role: "user".to_string(),
+            context_manager.add_message(ChatMessage {
+                role: "user".into(),
                 content: message.clone(),
-            };
-            context_manager.add_message(user_msg);
+            });
+            input_value.set(String::new());
 
-            // Clear input
-            set_input_value.set(String::new());
-
-            // Scroll after adding user message
-            scroll_to_bottom();
-
-            // Add loading cell
-            let loading_id = {
-                let mut id = None;
-                set_notebook.update(|nb| {
-                    id = Some(nb.add_cell(CellContent::Loading {
-                        message: Some("Thinking...".to_string()),
-                    }));
-                });
-                id.unwrap()
-            };
-
-            // Scroll after adding loading cell
-            scroll_to_bottom();
-
-            // Create streaming response cell BEFORE async block
             let response_id = {
                 let mut id = None;
                 set_notebook.update(|nb| {
-                    // Remove loading cell
-                    if let Some(pos) = nb.cells.iter().position(|c| c.id == loading_id) {
-                        nb.cells.remove(pos);
-                    }
-
-                    // Add response cell
                     id = Some(nb.add_cell(CellContent::TextResponse {
                         text: String::new(),
                         streaming: true,
@@ -556,679 +368,396 @@ where
                 id.unwrap()
             };
 
-            // Scroll after adding response cell
-            scroll_to_bottom();
-
-            // Start streaming response
             set_is_streaming.set(true);
-            let token = token.get();
-            let provider = selected_provider.get();
-            let model = selected_model.get();
-            let prompt_name = selected_prompt_name.get();
-            let custom = custom_prompt.get();
-            let prompts = system_prompts.get();
-
-            // Get the actual system prompt text
+            let tk = token.get_untracked();
+            let provider = selected_provider.get_untracked();
+            let model = selected_model.get_untracked();
+            let prompt_name = selected_prompt_name.get_untracked();
+            let custom = custom_prompt.get_untracked();
+            let prompts_snapshot = system_prompts.get_untracked();
             let system_prompt = if prompt_name == "Custom" {
                 Some(custom)
             } else {
-                prompts
+                prompts_snapshot
                     .iter()
                     .find(|p| p.name == prompt_name)
                     .map(|p| p.prompt.clone())
             };
-
-            let context_manager_clone = context_manager.clone();
+            let cm_clone = context_manager.clone();
             spawn_local(async move {
-                web_sys::console::log_1(&"Inside spawn_local".into());
-
-                // Create a 2-minute timeout future
-                use futures::FutureExt;
-                use gloo_timers::future::TimeoutFuture;
-
-                let timeout_duration = std::time::Duration::from_secs(120); // 2 minutes
-                let timeout = TimeoutFuture::new(timeout_duration.as_millis() as u32);
-
-                let client = ApiClient::new();
-
-                // Get full context for request
-                let context_messages = context_manager_clone.get_context_for_request();
-
-                // Send request and handle streaming response
-                let request = ChatRequest {
-                    provider: provider.clone(),
-                    messages: context_messages,
-                    model: Some(model),
+                stream_response(
+                    tk,
+                    provider,
+                    model,
                     system_prompt,
-                    temperature: Some(temperature.get_untracked()),
-                    max_tokens: None,
-                };
-
-                // Wrap the main request logic in a future
-                let request_future = async {
-                    // Use web-sys to make the request and handle streaming
-                    web_sys::console::log_1(&"Starting streaming request".into());
-                    if let Some(window) = web_sys::window() {
-                        use wasm_bindgen::JsCast;
-                        use wasm_bindgen_futures::JsFuture;
-                        use web_sys::{Headers, Request, RequestInit, Response};
-
-                        // Create request
-                        let opts = RequestInit::new();
-                        opts.set_method("POST");
-
-                        // Set headers
-                        let headers = Headers::new().unwrap();
-                        headers.append("Content-Type", "application/json").unwrap();
-                        headers
-                            .append("Authorization", &format!("Bearer {}", token))
-                            .unwrap();
-                        opts.set_headers(&headers);
-
-                        // Set body
-                        let body = serde_json::to_string(&request).unwrap();
-                        opts.set_body(&wasm_bindgen::JsValue::from_str(&body));
-
-                        let request =
-                            match Request::new_with_str_and_init(&client.chat_url(), &opts) {
-                                Ok(req) => req,
-                                Err(_) => {
-                                    set_notebook.update(|nb| {
-                                        nb.cells.push(crate::notebook::Cell {
-                                            id: CellId(nb.cells.len()),
-                                            content: CellContent::Error {
-                                                message: "Failed to create request".to_string(),
-                                                details: None,
-                                            },
-                                            timestamp: chrono::Utc::now(),
-                                            metadata: Default::default(),
-                                        });
-                                    });
-                                    set_is_streaming.set(false);
-                                    return;
-                                }
-                            };
-
-                        // Fetch and handle response
-                        web_sys::console::log_1(
-                            &format!("Fetching from: {}", client.chat_url()).into(),
-                        );
-                        let promise = window.fetch_with_request(&request);
-                        match JsFuture::from(promise).await {
-                            Ok(resp_value) => {
-                                let resp: Response = resp_value.dyn_into().unwrap();
-
-                                if !resp.ok() {
-                                    if resp.status() == 401 {
-                                        // Save the current input before logging out
-                                        if let Ok(Some(storage)) =
-                                            web_sys::window().unwrap().local_storage()
-                                        {
-                                            let _ = storage.set_item("pending_input", &message);
-                                        }
-
-                                        set_notebook.update(|nb| {
-                                    nb.cells.push(crate::notebook::Cell {
-                                        id: CellId(nb.cells.len()),
-                                        content: CellContent::Error {
-                                            message: "Authentication expired. Please log in again.".to_string(),
-                                            details: Some("Your message has been saved and will be restored after login.".to_string()),
-                                        },
-                                        timestamp: chrono::Utc::now(),
-                                        metadata: Default::default(),
-                                    });
-                                });
-                                        set_is_streaming.set(false);
-
-                                        // Trigger auth error callback after a short delay to show the message
-                                        spawn_local(async move {
-                                            gloo_timers::future::sleep(
-                                                std::time::Duration::from_secs(2),
-                                            )
-                                            .await;
-                                            set_auth_error_triggered.set(true);
-                                        });
-                                        return;
-                                    }
-
-                                    set_notebook.update(|nb| {
-                                        nb.cells.push(crate::notebook::Cell {
-                                            id: CellId(nb.cells.len()),
-                                            content: CellContent::Error {
-                                                message: format!("Server error: {}", resp.status()),
-                                                details: None,
-                                            },
-                                            timestamp: chrono::Utc::now(),
-                                            metadata: Default::default(),
-                                        });
-                                    });
-                                    set_is_streaming.set(false);
-                                    return;
-                                }
-
-                                // Get the body as a stream
-                                if let Some(body) = resp.body() {
-                                    use futures::StreamExt;
-                                    use wasm_streams::ReadableStream;
-
-                                    let stream = ReadableStream::from_raw(body);
-                                    let mut reader = stream.into_stream();
-
-                                    let mut buffer = String::new();
-                                    let mut complete_response = String::new();
-
-                                    while let Some(chunk) = reader.next().await {
-                                        match chunk {
-                                            Ok(data) => {
-                                                let array = js_sys::Uint8Array::new(&data);
-                                                let mut bytes = vec![0u8; array.length() as usize];
-                                                array.copy_to(&mut bytes);
-
-                                                if let Ok(text) = String::from_utf8(bytes) {
-                                                    buffer.push_str(&text);
-
-                                                    // Process complete SSE events
-                                                    while let Some(event_end) = buffer.find("\n\n")
-                                                    {
-                                                        let event = buffer[..event_end].to_string();
-                                                        buffer.drain(..event_end + 2);
-
-                                                        // Parse SSE event
-                                                        if let Some(data_line) = event
-                                                            .lines()
-                                                            .find(|line| line.starts_with("data: "))
-                                                        {
-                                                            let data = &data_line[6..]; // Skip "data: "
-
-                                                            if let Ok(chunk) = serde_json::from_str::<
-                                                                crate::api::ChatChunk,
-                                                            >(
-                                                                data
-                                                            ) {
-                                                                complete_response
-                                                                    .push_str(&chunk.text);
-
-                                                                set_notebook.update(|nb| {
-                                                            nb.update_streaming_response(response_id, &chunk.text);
-                                                            if chunk.done {
-                                                                nb.finalize_streaming_response(response_id);
-                                                            }
-                                                        });
-
-                                                                // Scroll during streaming
-                                                                scroll_to_bottom();
-
-                                                                if chunk.done {
-                                                                    // Add complete response to context
-                                                                    let assistant_msg =
-                                                                        ChatMessage {
-                                                                            role: "assistant"
-                                                                                .to_string(),
-                                                                            content:
-                                                                                complete_response
-                                                                                    .clone(),
-                                                                        };
-                                                                    context_manager_clone
-                                                                        .add_message(assistant_msg);
-
-                                                                    set_is_streaming.set(false);
-                                                                    return;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Err(_) => {
-                                                set_notebook.update(|nb| {
-                                                    nb.cells.push(crate::notebook::Cell {
-                                                        id: CellId(nb.cells.len()),
-                                                        content: CellContent::Error {
-                                                            message: "Stream read error"
-                                                                .to_string(),
-                                                            details: None,
-                                                        },
-                                                        timestamp: chrono::Utc::now(),
-                                                        metadata: Default::default(),
-                                                    });
-                                                });
-                                                set_is_streaming.set(false);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                set_notebook.update(|nb| {
-                                    nb.cells.push(crate::notebook::Cell {
-                                        id: CellId(nb.cells.len()),
-                                        content: CellContent::Error {
-                                            message: "Network error".to_string(),
-                                            details: None,
-                                        },
-                                        timestamp: chrono::Utc::now(),
-                                        metadata: Default::default(),
-                                    });
-                                });
-                                set_is_streaming.set(false);
-                            }
-                        }
-                    }
-                }; // End of request_future async block
-
-                // Race the request against the timeout
-                futures::select! {
-                    _ = request_future.fuse() => {
-                        // Request completed normally (streaming state already cleared in the branches above)
-                        web_sys::console::log_1(&"Request completed successfully".into());
-                    }
-                    _ = timeout.fuse() => {
-                        // Timeout occurred - clear streaming state and add error
-                        web_sys::console::error_1(&"Request timed out after 2 minutes".into());
-                        set_is_streaming.set(false);
-                        set_notebook.update(|nb| {
-                            // Remove the streaming response cell if it still exists
-                            if let Some(pos) = nb.cells.iter().position(|c| c.id == response_id) {
-                                nb.cells.remove(pos);
-                            }
-
-                            // Add timeout error cell
-                            nb.cells.push(crate::notebook::Cell {
-                                id: CellId(nb.cells.len()),
-                                content: CellContent::Error {
-                                    message: "Request timed out".to_string(),
-                                    details: Some("The AI model didn't respond within 2 minutes. This may be due to high load or network issues. Please try again.".to_string()),
-                                },
-                                timestamp: chrono::Utc::now(),
-                                metadata: Default::default(),
-                            });
-                        });
-                    }
-                }
+                    temperature.get_untracked(),
+                    cm_clone.clone(),
+                    set_notebook,
+                    response_id,
+                    set_is_streaming,
+                    set_auth_error_triggered,
+                    message,
+                )
+                .await;
             });
         }
     });
 
-    let handle_keydown = move |event: KeyboardEvent| {
-        if event.key() == "Enter" && !event.shift_key() {
-            event.prevent_default();
-            set_should_submit.set(true);
+    let has_messages = create_memo(move |_| {
+        notebook.get().cells.iter().any(|c| {
+            matches!(
+                &c.content,
+                CellContent::UserInput { .. } | CellContent::TextResponse { .. }
+            )
+        })
+    });
+
+    let provider_online = Signal::derive(move || !providers.get().is_empty());
+    let user_signal = Signal::derive({
+        let label = user_label.clone();
+        move || label.clone()
+    });
+
+    let simple_storage_new = simple_storage.clone();
+    let cm_for_new = context_manager.clone();
+    let on_new_chat = Callback::new(move |_| {
+        let new_id = Uuid::new_v4().to_string();
+        write_local("current_conversation_id", &new_id);
+        set_conversation_id.set(new_id);
+        set_notebook.update(|nb| {
+            nb.cells.clear();
+            nb.cursor_position = CellId(0);
+        });
+        cm_for_new.clear_context();
+        set_created_at.set(Utc::now());
+        if let Ok(list) = simple_storage_new.list_conversations(50) {
+            set_conversations.set(list);
         }
-    };
+    });
 
-    let context_manager_for_display = context_manager.clone();
-    let context_manager_for_clear = context_manager.clone();
+    let simple_storage_sel = simple_storage.clone();
+    let cm_for_sel = context_manager.clone();
+    let on_select = Callback::new(move |id: String| {
+        if id == conversation_id.get_untracked() {
+            return;
+        }
+        write_local("current_conversation_id", &id);
+        set_conversation_id.set(id.clone());
+        if let Ok(Some(stored)) = simple_storage_sel.load_conversation(&id) {
+            cm_for_sel.restore_state(stored.context_state);
+            set_notebook.update(|nb| *nb = stored.notebook);
+            set_created_at.set(stored.metadata.created_at);
+        }
+    });
 
-    // State for dynamic input area height
-    let (input_area_height, set_input_area_height) = create_signal(200i32);
+    let simple_storage_del = simple_storage.clone();
+    let cm_for_del = context_manager.clone();
+    let on_delete = Callback::new(move |id: String| {
+        let _ = simple_storage_del.delete_conversation(&id);
+        if let Ok(list) = simple_storage_del.list_conversations(50) {
+            set_conversations.set(list);
+        }
+        if id == conversation_id.get_untracked() {
+            let new_id = Uuid::new_v4().to_string();
+            write_local("current_conversation_id", &new_id);
+            set_conversation_id.set(new_id);
+            set_notebook.update(|nb| {
+                nb.cells.clear();
+                nb.cursor_position = CellId(0);
+            });
+            cm_for_del.clear_context();
+            set_created_at.set(Utc::now());
+        }
+    });
+
+    let logout_cb = on_logout.clone();
+    let on_logout_cb = Callback::new(move |_| logout_cb());
+
+    let on_submit = Callback::new(move |_| set_should_submit.set(true));
+
+    let on_pick_suggestion = Callback::new(move |text: String| {
+        input_value.set(text);
+    });
+
+    let user_initial = user_label
+        .chars()
+        .next()
+        .map(|c| c.to_ascii_uppercase().to_string())
+        .unwrap_or_else(|| "U".into());
+
+    let cm_for_composer = context_manager.clone();
 
     view! {
-        <div class="chat-container">
-            <div class="chat-header">
-                <div class="selectors-container">
-                    <div class="selector-column">
-                        <label class="selector-label">Conversations</label>
-                        <div class="dropdown-wrapper">
-                            <button
-                                class="selector-dropdown conversation-button"
-                                on:click=move |e| {
-                                    e.stop_propagation();
-                                    set_show_conversation_dropdown.update(|v| *v = !*v);
-                                }
-                            >
-                                {move || {
-                                    let current_id = conversation_id.get();
-                                    conversations.get().iter()
-                                        .find(|c| c.id == current_id)
-                                        .map(|c| c.title.clone())
-                                        .unwrap_or_else(|| "New Conversation".to_string())
-                                }}
-                                <span class="dropdown-arrow">{"▼"}</span>
-                            </button>
-
-                            {move || if show_conversation_dropdown.get() {
-                                let context_manager_clone = context_manager.clone();
-                                let simple_storage = simple_storage.clone();
-                                let context_manager = context_manager.clone();
-                                view! {
-                                    <div class="conversation-dropdown-menu">
-                                        <button
-                                            class="new-conversation-btn"
-                                            on:click=move |_| {
-                                                // Create new conversation
-                                                let new_id = Uuid::new_v4().to_string();
-                                                if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                                                    let _ = storage.set_item("current_conversation_id", &new_id);
-                                                }
-                                                set_conversation_id.set(new_id);
-                                                set_notebook.update(|nb| {
-                                                    nb.cells.clear();
-                                                    nb.cursor_position = crate::notebook::CellId(0);
-                                                });
-                                                context_manager_clone.clear_context();
-                                                set_created_at.set(Utc::now());
-                                                set_has_messages.set(false);
-                                                set_show_conversation_dropdown.set(false);
-                                            }
-                                        >
-                                            "+ New Conversation"
-                                        </button>
-
-                                        <div class="conversation-count">
-                                            {move || format!("{} / 25 conversations", conversations.get().len())}
-                                        </div>
-
-                                        <div class="conversation-list">
-                                            {move || conversations.get().into_iter().map({
-                                                let simple_storage = simple_storage.clone();
-                                                let context_manager = context_manager.clone();
-                                                move |conv| {
-                                                    let is_current = conv.id == conversation_id.get();
-                                                    let conv_id = conv.id.clone();
-                                                    let conv_clone = conv.clone();
-                                                    view! {
-                                                        <div class="conversation-item" class:current=is_current>
-                                                            <button
-                                                                class="conversation-select-btn"
-                                                                on:click={
-                                                                    let conv_id = conv_id.clone();
-                                                                    let simple_storage = simple_storage.clone();
-                                                                    let context_manager = context_manager.clone();
-                                                                    move |_| {
-                                                                        if !is_current {
-                                                                            // Switch to this conversation
-                                                                            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                                                                                let _ = storage.set_item("current_conversation_id", &conv_id);
-                                                                            }
-                                                                            set_conversation_id.set(conv_id.clone());
-                                                                            set_show_conversation_dropdown.set(false);
-
-                                                                            // Load the conversation
-                                                                            if let Ok(Some(stored)) = simple_storage.load_conversation(&conv_id) {
-                                                                                context_manager.restore_state(stored.context_state);
-
-                                                                                // Check if conversation has messages
-                                                                                let has_msgs = stored.notebook.cells.iter().any(|cell| matches!(
-                                                                                    &cell.content,
-                                                                                    CellContent::UserInput { .. } | CellContent::TextResponse { .. }
-                                                                                ));
-                                                                                set_has_messages.set(has_msgs);
-
-                                                                                set_notebook.update(|nb| {
-                                                                                    *nb = stored.notebook;
-                                                                                });
-                                                                                set_created_at.set(stored.metadata.created_at);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            >
-                                                                <div class="conversation-title">{conv_clone.title}</div>
-                                                                <div class="conversation-preview">{conv_clone.preview}</div>
-                                                                <div class="conversation-date">{format_conversation_date(&conv_clone.modified_at)}</div>
-                                                            </button>
-                                                            <button
-                                                                class="conversation-delete-btn"
-                                                                on:click={
-                                                                    let conv_id = conv.id.clone();
-                                                                    let simple_storage = simple_storage.clone();
-                                                                    let context_manager_clone = context_manager.clone();
-                                                                    move |e| {
-                                                                        e.stop_propagation();
-                                                                        // Delete the conversation
-                                                                        let _ = simple_storage.delete_conversation(&conv_id);
-                                                                        // Refresh list
-                                                                        if let Ok(conv_list) = simple_storage.list_conversations(20) {
-                                                                            set_conversations.set(conv_list);
-                                                                        }
-                                                                        // If deleting current conversation, create new one
-                                                                        if conv_id == conversation_id.get() {
-                                                                            let new_id = Uuid::new_v4().to_string();
-                                                                            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                                                                                let _ = storage.set_item("current_conversation_id", &new_id);
-                                                                            }
-                                                                            set_conversation_id.set(new_id);
-                                                                            set_notebook.update(|nb| {
-                                                                                nb.cells.clear();
-                                                                                nb.cursor_position = crate::notebook::CellId(0);
-                                                                            });
-                                                                            context_manager_clone.clear_context();
-                                                                            set_created_at.set(Utc::now());
-                                                                            set_has_messages.set(false);
-                                                                        }
-                                                                    }
-                                                                }
-                                                                title="Delete conversation"
-                                                            >
-                                                                "×"
-                                                            </button>
-                                                        </div>
-                                                    }
-                                                }
-                                            }).collect_view()}
-                                        </div>
-                                    </div>
-                                }.into_view()
-                            } else {
-                                view! { <div></div> }.into_view()
+        <div class="app" style:grid-template-columns=move || format!("{}px 1fr", sidebar_width.get())>
+            <Sidebar
+                conversations=conversations.into()
+                current_id=conversation_id
+                search=search_query
+                theme=theme
+                provider_online=provider_online
+                user_name=user_signal
+                on_new=on_new_chat
+                on_select=on_select
+                on_delete=on_delete
+                on_logout=on_logout_cb
+            />
+            <SidebarResize width=sidebar_width/>
+            <main class="main">
+                <div class="chat-header">
+                    <div class="chat-title">
+                        <span class="chat-title-text">
+                            {move || {
+                                let id = conversation_id.get();
+                                conversations.get().iter()
+                                    .find(|c| c.id == id)
+                                    .map(|c| c.title.clone())
+                                    .unwrap_or_else(|| "New chat".into())
                             }}
-                        </div>
+                        </span>
                     </div>
-
                     {move || if providers_loaded.get() {
                         view! {
                             <>
-                                <div class="selector-column">
-                                    <label class="selector-label">Provider</label>
-                                    <select
-                                        class="selector-dropdown"
-                                        disabled=move || has_messages.get()
-                                        on:change=move |ev| {
-                                            set_provider_manually_changed.set(true);
-                                            set_selected_provider.set(event_target_value(&ev));
-                                        }
-                                    >
-                                        {move || {
-                                            let current = selected_provider.get();
-                                            providers.get().into_iter().map(|p| {
-                                                let is_selected = p.name == current;
-                                                view! {
-                                                    <option value=p.name.clone() selected=is_selected>{p.name}</option>
-                                                }
-                                            }).collect_view()
-                                        }}
-                                    </select>
-                                </div>
-
-                                <div class="selector-column">
-                                    <label class="selector-label">Model</label>
-                                    <select
-                                        class="selector-dropdown"
-                                        disabled=move || has_messages.get()
-                                        on:change=move |ev| set_selected_model.set(event_target_value(&ev))
-                                    >
-                                        {move || {
-                                            let current_provider = selected_provider.get();
-                                            let current_model = selected_model.get();
-                                            let all_providers = providers.get();
-
-                                            if let Some(provider) = all_providers.iter().find(|p| p.name == current_provider) {
-                                                provider.models.clone().into_iter().map(|model| {
-                                                    let is_selected = model == current_model;
-                                                    view! {
-                                                        <option value=model.clone() selected=is_selected>{model}</option>
-                                                    }
-                                                }).collect_view()
-                                            } else {
-                                                leptos::View::default()
-                                            }
-                                        }}
-                                    </select>
-                                </div>
-
-                                <div class="selector-column">
-                                    <label class="selector-label">Persona</label>
-                                    <select
-                                        class="selector-dropdown"
-                                        on:change=move |ev| set_selected_prompt_name.set(event_target_value(&ev))
-                                    >
-                                        {move || {
-                                            let current = selected_prompt_name.get();
-                                            system_prompts.get().into_iter().map(|prompt| {
-                                                let is_selected = prompt.name == current;
-                                                view! {
-                                                    <option value=prompt.name.clone() selected=is_selected>{prompt.name}</option>
-                                                }
-                                            }).collect_view()
-                                        }}
-                                    </select>
-                                </div>
-
-                                <div class="selector-column">
-                                    <label class="selector-label">Temperature: {move || format!("{:.1}", temperature.get())}</label>
-                                    <input
-                                        type="range"
-                                        class="temperature-slider"
-                                        min="0.0"
-                                        max="1.0"
-                                        step="0.1"
-                                        prop:value=move || temperature.get().to_string()
-                                        on:input=move |ev| {
-                                            if let Ok(val) = event_target_value(&ev).parse::<f32>() {
-                                                set_temperature.set(val);
-                                            }
-                                        }
-                                    />
-                                </div>
+                                <ModelPicker
+                                    providers=providers.read_only()
+                                    selected_provider=selected_provider
+                                    selected_model=selected_model
+                                    disabled=has_messages.into()
+                                />
+                                <PersonaPicker
+                                    prompts=system_prompts.read_only()
+                                    selected_name=selected_prompt_name
+                                    custom_prompt=custom_prompt
+                                />
                             </>
                         }.into_view()
                     } else {
-                        view! {
-                            <div class="loading-message">Loading providers...</div>
-                        }.into_view()
+                        view! { <span class="chat-title-meta">"Loading…"</span> }.into_view()
                     }}
                 </div>
 
-                {move || {
-                    if selected_prompt_name.get() == "Custom" {
+                <div class="thread-wrap" node_ref=thread_ref>
+                    {move || if !has_messages.get() {
                         view! {
-                            <div class="custom-prompt-container">
-                                <textarea
-                                    class="custom-prompt-input"
-                                    placeholder="Enter your custom system prompt..."
-                                    prop:value=move || custom_prompt.get()
-                                    on:input=move |ev| set_custom_prompt.set(event_target_value(&ev))
-                                    rows="3"
+                            <EmptyState
+                                user_name=user_signal
+                                on_pick=on_pick_suggestion
+                            />
+                        }.into_view()
+                    } else {
+                        let initial_for_each = user_initial.clone();
+                        view! {
+                            <div class="thread">
+                                <For
+                                    each=move || notebook.get().cells
+                                    key=|c| c.id.0
+                                    children=move |cell| {
+                                        let ctx = CellContext {
+                                            user_initial: initial_for_each.clone(),
+                                            persona_name: selected_prompt_name.get_untracked(),
+                                        };
+                                        view! { <CellView cell=cell ctx=ctx notebook=notebook/> }
+                                    }
                                 />
                             </div>
                         }.into_view()
-                    } else {
-                        view! { <div></div> }.into_view()
-                    }
-                }}
-            </div>
-
-            <div class="notebook-container" node_ref=notebook_ref>
-                {move || notebook.get().cells.into_iter().map(|cell| {
-                    view! {
-                        <crate::notebook::cell::CellView cell=cell/>
-                    }
-                }).collect_view()}
-            </div>
-
-            <ResizeHandle
-                on_resize=move |height| set_input_area_height.set(height)
-            />
-
-            <div
-                class="input-container"
-                style:height=move || format!("{}px", input_area_height.get())
-            >
-                <div class="input-wrapper" class=("streaming", move || is_streaming.get())>
-                    {move || if is_streaming.get() {
-                        view! {
-                            <div class="streaming-indicator">
-                                <div class="streaming-dots">
-                                    <span class="dot"></span>
-                                    <span class="dot"></span>
-                                    <span class="dot"></span>
-                                </div>
-                                <span class="streaming-text">"Generating"</span>
-                            </div>
-                        }.into_view()
-                    } else {
-                        view! { <span></span> }.into_view()
                     }}
-                    <textarea
-                        class="chat-input"
-                        placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
-                        prop:value=move || input_value.get()
-                        on:input=move |ev| set_input_value.set(event_target_value(&ev))
-                        on:keydown=handle_keydown
-                        disabled=move || is_streaming.get()
-                    />
                 </div>
-                <ContextDisplay
-                    context_manager=context_manager_for_display.clone()
-                    on_compress=move || {
-                        web_sys::console::log_1(&"Manual compression requested".into());
-                        let compressed = context_manager_for_display.compress_context();
-                        if compressed {
-                            web_sys::console::log_1(&"Manual compression successful".into());
-                        } else {
-                            web_sys::console::log_1(&"Manual compression failed - not enough messages or no token savings".into());
-                        }
-                    }
-                    on_clear={
-                        move || {
-                            web_sys::console::log_1(&"Clear context clicked".into());
-                            context_manager_for_clear.clear_context();
-                            set_notebook.update(|nb| {
-                                nb.cells.clear();
-                                nb.cursor_position = CellId(0);
-                            });
-                            set_has_messages.set(false);
-
-                            // Generate new conversation ID
-                            let new_id = Uuid::new_v4().to_string();
-                            if let Ok(Some(storage)) = web_sys::window().unwrap().local_storage() {
-                                let _ = storage.set_item("current_conversation_id", &new_id);
-                            }
-
-                            // Reload to start fresh
-                            let _ = web_sys::window().unwrap().location().reload();
-                        }
-                    }
-                    on_logout=on_logout
+                <Composer
+                    input_value=input_value
+                    is_streaming=is_streaming
+                    temperature=temperature
+                    context_manager=cm_for_composer
+                    on_submit=on_submit
                 />
-            </div>
+            </main>
         </div>
     }
 }
 
-fn format_conversation_date(dt: &chrono::DateTime<chrono::Utc>) -> String {
-    // Convert UTC to local time
-    let local_dt = Local.from_utc_datetime(&dt.naive_utc());
+#[allow(clippy::too_many_arguments)]
+async fn stream_response(
+    token: String,
+    provider: String,
+    model: String,
+    system_prompt: Option<String>,
+    temperature: f32,
+    context_manager: ContextManager,
+    set_notebook: WriteSignal<Notebook>,
+    response_id: CellId,
+    set_is_streaming: WriteSignal<bool>,
+    set_auth_error: WriteSignal<bool>,
+    pending_message: String,
+) {
+    use futures::FutureExt;
+    use futures::StreamExt;
+    use gloo_timers::future::TimeoutFuture;
+    use wasm_bindgen_futures::JsFuture;
+    use wasm_streams::ReadableStream;
+    use web_sys::{Headers, Request, RequestInit, Response};
 
-    // Format based on how recent the timestamp is
-    let now = Local::now();
-    let duration = now.signed_duration_since(local_dt);
+    let client = ApiClient::new();
+    let context_messages = context_manager.get_context_for_request();
+    let req = ChatRequest {
+        provider,
+        messages: context_messages,
+        model: Some(model),
+        system_prompt,
+        temperature: Some(temperature),
+        max_tokens: None,
+    };
 
-    if duration.num_days() == 0 {
-        // Today - just show time
-        local_dt.format("Today %H:%M").to_string()
-    } else if duration.num_days() == 1 {
-        // Yesterday
-        local_dt.format("Yesterday %H:%M").to_string()
-    } else if duration.num_days() < 7 {
-        // This week - show day name
-        local_dt.format("%a %H:%M").to_string()
-    } else if duration.num_days() < 365 {
-        // This year - show month and day
-        local_dt.format("%b %d").to_string()
-    } else {
-        // Older - show full date
-        local_dt.format("%m/%d/%y").to_string()
+    let push_error = move |msg: &str, details: Option<String>| {
+        set_notebook.update(|nb| {
+            nb.cells.push(crate::notebook::Cell {
+                id: CellId(nb.cells.len()),
+                content: CellContent::Error {
+                    message: msg.to_string(),
+                    details,
+                },
+                timestamp: chrono::Utc::now(),
+                metadata: Default::default(),
+            });
+        });
+    };
+
+    let timeout = TimeoutFuture::new(120_000);
+    let request_future = async {
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => {
+                push_error("No window context", None);
+                set_is_streaming.set(false);
+                return;
+            }
+        };
+
+        let opts = RequestInit::new();
+        opts.set_method("POST");
+        let headers = Headers::new().unwrap();
+        headers.append("Content-Type", "application/json").unwrap();
+        headers
+            .append("Authorization", &format!("Bearer {}", token))
+            .unwrap();
+        opts.set_headers(&headers);
+        let body = serde_json::to_string(&req).unwrap();
+        opts.set_body(&wasm_bindgen::JsValue::from_str(&body));
+
+        let request = match Request::new_with_str_and_init(&client.chat_url(), &opts) {
+            Ok(r) => r,
+            Err(_) => {
+                push_error("Failed to create request", None);
+                set_is_streaming.set(false);
+                return;
+            }
+        };
+
+        let resp: Response = match JsFuture::from(window.fetch_with_request(&request)).await {
+            Ok(v) => v.dyn_into().unwrap(),
+            Err(_) => {
+                push_error("Network error", None);
+                set_is_streaming.set(false);
+                return;
+            }
+        };
+
+        if !resp.ok() {
+            if resp.status() == 401 {
+                write_local("pending_input", &pending_message);
+                push_error(
+                    "Authentication expired. Please log in again.",
+                    Some("Your message has been saved and will be restored after login.".into()),
+                );
+                set_is_streaming.set(false);
+                spawn_local(async move {
+                    gloo_timers::future::sleep(std::time::Duration::from_secs(2)).await;
+                    set_auth_error.set(true);
+                });
+                return;
+            }
+            push_error(&format!("Server error: {}", resp.status()), None);
+            set_is_streaming.set(false);
+            return;
+        }
+
+        let body = match resp.body() {
+            Some(b) => b,
+            None => {
+                push_error("Empty response", None);
+                set_is_streaming.set(false);
+                return;
+            }
+        };
+
+        let mut reader = ReadableStream::from_raw(body).into_stream();
+        let mut buffer = String::new();
+        let mut full = String::new();
+        while let Some(chunk) = reader.next().await {
+            match chunk {
+                Ok(data) => {
+                    let arr = js_sys::Uint8Array::new(&data);
+                    let mut bytes = vec![0u8; arr.length() as usize];
+                    arr.copy_to(&mut bytes);
+                    let Ok(text) = String::from_utf8(bytes) else {
+                        continue;
+                    };
+                    buffer.push_str(&text);
+                    while let Some(end) = buffer.find("\n\n") {
+                        let event = buffer[..end].to_string();
+                        buffer.drain(..end + 2);
+                        let Some(data_line) = event.lines().find(|l| l.starts_with("data: "))
+                        else {
+                            continue;
+                        };
+                        let Ok(chunk) =
+                            serde_json::from_str::<crate::api::ChatChunk>(&data_line[6..])
+                        else {
+                            continue;
+                        };
+                        full.push_str(&chunk.text);
+                        set_notebook.update(|nb| {
+                            nb.update_streaming_response(response_id, &chunk.text);
+                            if chunk.done {
+                                nb.finalize_streaming_response(response_id);
+                            }
+                        });
+                        if chunk.done {
+                            context_manager.add_message(ChatMessage {
+                                role: "assistant".into(),
+                                content: full.clone(),
+                            });
+                            set_is_streaming.set(false);
+                            return;
+                        }
+                    }
+                }
+                Err(_) => {
+                    push_error("Stream read error", None);
+                    set_is_streaming.set(false);
+                    return;
+                }
+            }
+        }
+    };
+
+    futures::select! {
+        _ = request_future.fuse() => {}
+        _ = timeout.fuse() => {
+            set_is_streaming.set(false);
+            set_notebook.update(|nb| {
+                if let Some(pos) = nb.cells.iter().position(|c| c.id == response_id) {
+                    nb.cells.remove(pos);
+                }
+                nb.cells.push(crate::notebook::Cell {
+                    id: CellId(nb.cells.len()),
+                    content: CellContent::Error {
+                        message: "Request timed out".into(),
+                        details: Some("The model didn't respond within 2 minutes.".into()),
+                    },
+                    timestamp: chrono::Utc::now(),
+                    metadata: Default::default(),
+                });
+            });
+        }
     }
 }

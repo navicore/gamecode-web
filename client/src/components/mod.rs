@@ -1,4 +1,10 @@
 pub mod auth;
 pub mod chat;
+pub mod composer;
 pub mod context_manager;
-pub mod resize_handle;
+pub mod empty_state;
+pub mod icons;
+pub mod model_picker;
+pub mod persona_picker;
+pub mod sidebar;
+pub mod sidebar_resize;
