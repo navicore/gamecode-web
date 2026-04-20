@@ -8,7 +8,7 @@ use serde_json::json;
 #[derive(Debug)]
 pub enum AppError {
     Internal(anyhow::Error),
-    Unauthorized,
+    BadRequest(String),
 }
 
 impl IntoResponse for AppError {
@@ -21,7 +21,7 @@ impl IntoResponse for AppError {
                     "Internal server error".to_string(),
                 )
             }
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
         };
 
         let body = Json(json!({

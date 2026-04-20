@@ -9,10 +9,18 @@ mod notebook;
 mod simple_storage;
 mod storage;
 
+use api::{ApiClient, ApiError};
 use components::{
-    auth::{clear_auth_token, get_stored_token, is_token_valid, AuthForm},
+    auth::{redirect_to_login, LoginRedirect},
     chat::Chat,
 };
+
+#[derive(Clone, Copy, PartialEq)]
+enum AuthState {
+    Checking,
+    Unauthenticated,
+    Authenticated,
+}
 
 #[component]
 fn App() -> impl IntoView {
@@ -33,53 +41,50 @@ fn App() -> impl IntoView {
 
 #[component]
 fn HomePage() -> impl IntoView {
-    web_sys::console::log_1(&"HomePage component rendering...".into());
+    let (auth_state, set_auth_state) = create_signal(AuthState::Checking);
+    let (username, set_username) = create_signal(String::new());
 
-    let (authenticated, set_authenticated) = create_signal(false);
-    let (token, set_token) = create_signal(String::new());
-
-    // Check for existing token in localStorage
     create_effect(move |_| {
-        if let Some(auth_token) = get_stored_token() {
-            if is_token_valid(&auth_token) {
-                set_token.set(auth_token.token);
-                set_authenticated.set(true);
-            } else {
-                // Token expired, clear it
-                clear_auth_token();
+        spawn_local(async move {
+            let client = ApiClient::new();
+            match client.me().await {
+                Ok(me) => {
+                    set_username.set(me.username);
+                    set_auth_state.set(AuthState::Authenticated);
+                }
+                Err(ApiError::Unauthorized) => {
+                    set_auth_state.set(AuthState::Unauthenticated);
+                }
+                Err(e) => {
+                    web_sys::console::error_1(&format!("/api/me failed: {e}").into());
+                    set_auth_state.set(AuthState::Unauthenticated);
+                }
             }
-        }
+        });
     });
 
     view! {
         <div class="app-container">
-            {move || if authenticated.get() {
-                view! {
-                    <Chat
-                        token=token.get()
-                        on_auth_error=move || {
-                            // Clear auth state and logout
-                            set_authenticated.set(false);
-                            set_token.set(String::new());
-                            clear_auth_token();
-                        }
-                        on_logout=move || {
-                            // User-initiated logout
-                            set_authenticated.set(false);
-                            set_token.set(String::new());
-                            clear_auth_token();
-                        }
-                    />
-                }.into_view()
-            } else {
-                view! {
-                    <AuthForm
-                        on_auth=move |token_value| {
-                            set_token.set(token_value.clone());
-                            set_authenticated.set(true);
-                        }
-                    />
-                }.into_view()
+            {move || match auth_state.get() {
+                AuthState::Checking => view! {
+                    <div class="auth-container"><p>"Loading…"</p></div>
+                }.into_view(),
+                AuthState::Unauthenticated => view! { <LoginRedirect/> }.into_view(),
+                AuthState::Authenticated => {
+                    let user_signal = Signal::derive(move || username.get());
+                    view! {
+                        <Chat
+                            user_name=user_signal
+                            on_auth_error=move || redirect_to_login()
+                            on_logout=move || {
+                                spawn_local(async move {
+                                    let _ = ApiClient::new().logout().await;
+                                    redirect_to_login();
+                                });
+                            }
+                        />
+                    }.into_view()
+                }
             }}
         </div>
     }
@@ -97,11 +102,8 @@ fn NotFound() -> impl IntoView {
 
 fn main() {
     console_error_panic_hook::set_once();
-
-    // Initialize tracing for WASM
     tracing_wasm::set_as_global_default();
 
-    // Mount the app to the #app div
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(app_div) = document.get_element_by_id("app") {
