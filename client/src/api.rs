@@ -12,6 +12,11 @@ pub enum ApiError {
     Server(String),
 }
 
+#[derive(Deserialize, Clone)]
+pub struct MeResponse {
+    pub username: String,
+}
+
 #[derive(Deserialize)]
 pub struct ProvidersResponse {
     pub providers: Vec<ProviderInfo>,
@@ -51,15 +56,13 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn new() -> Self {
-        // In production, this would come from config
         Self {
             base_url: "/api".to_string(),
         }
     }
 
-    pub async fn list_providers(&self, token: &str) -> Result<ProvidersResponse, ApiError> {
-        let response = Request::get(&format!("{}/providers", self.base_url))
-            .header("Authorization", &format!("Bearer {}", token))
+    pub async fn me(&self) -> Result<MeResponse, ApiError> {
+        let response = Request::get(&format!("{}/me", self.base_url))
             .send()
             .await
             .map_err(|e| ApiError::Network(e.to_string()))?;
@@ -67,11 +70,38 @@ impl ApiClient {
         if response.status() == 401 {
             return Err(ApiError::Unauthorized);
         }
-
         if !response.ok() {
             return Err(ApiError::Server(format!("Status: {}", response.status())));
         }
+        response
+            .json::<MeResponse>()
+            .await
+            .map_err(|e| ApiError::Network(e.to_string()))
+    }
 
+    pub async fn logout(&self) -> Result<(), ApiError> {
+        let response = Request::post(&format!("{}/auth/logout", self.base_url))
+            .send()
+            .await
+            .map_err(|e| ApiError::Network(e.to_string()))?;
+        if !response.ok() {
+            return Err(ApiError::Server(format!("Status: {}", response.status())));
+        }
+        Ok(())
+    }
+
+    pub async fn list_providers(&self) -> Result<ProvidersResponse, ApiError> {
+        let response = Request::get(&format!("{}/providers", self.base_url))
+            .send()
+            .await
+            .map_err(|e| ApiError::Network(e.to_string()))?;
+
+        if response.status() == 401 {
+            return Err(ApiError::Unauthorized);
+        }
+        if !response.ok() {
+            return Err(ApiError::Server(format!("Status: {}", response.status())));
+        }
         response
             .json::<ProvidersResponse>()
             .await
@@ -82,9 +112,8 @@ impl ApiClient {
         format!("{}/chat", self.base_url)
     }
 
-    pub async fn list_prompts(&self, token: &str) -> Result<PromptsResponse, ApiError> {
+    pub async fn list_prompts(&self) -> Result<PromptsResponse, ApiError> {
         let response = Request::get(&format!("{}/prompts", self.base_url))
-            .header("Authorization", &format!("Bearer {}", token))
             .send()
             .await
             .map_err(|e| ApiError::Network(e.to_string()))?;
@@ -92,11 +121,9 @@ impl ApiClient {
         if response.status() == 401 {
             return Err(ApiError::Unauthorized);
         }
-
         if !response.ok() {
             return Err(ApiError::Server(format!("Status: {}", response.status())));
         }
-
         response
             .json::<PromptsResponse>()
             .await

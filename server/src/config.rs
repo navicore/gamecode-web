@@ -1,11 +1,6 @@
 use anyhow::{anyhow, Context, Result};
-use argon2::{
-    password_hash::{rand_core::OsRng, SaltString},
-    Argon2, PasswordHasher,
-};
-use rand::{distr::Alphanumeric, Rng};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use std::env;
-use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -23,9 +18,17 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone)]
 pub struct AuthConfig {
-    pub password_hash: String,
-    pub jwt_secret: String,
-    pub session_duration_hours: u64,
+    pub oidc: OidcConfig,
+    pub session_key: [u8; 32],
+}
+
+#[derive(Debug, Clone)]
+pub struct OidcConfig {
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_uri: String,
+    pub scopes: String,
 }
 
 #[derive(Debug, Clone)]
@@ -43,20 +46,14 @@ pub struct OllamaConfig {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let plaintext_password =
-            env::var("GAMECODE_AUTH_PASSWORD").context("GAMECODE_AUTH_PASSWORD must be set")?;
-        let password_hash = hash_password(&plaintext_password)?;
-
-        let jwt_secret = match env::var("GAMECODE_AUTH_JWT_SECRET") {
-            Ok(s) if !s.is_empty() => s,
-            _ => {
-                warn!(
-                    "GAMECODE_AUTH_JWT_SECRET not set — generating ephemeral secret; \
-                     all sessions invalidate on restart"
-                );
-                generate_random_secret(48)
-            }
+        let oidc = OidcConfig {
+            issuer: require("GAMECODE_AUTH_OIDC_ISSUER_URL")?,
+            client_id: require("GAMECODE_AUTH_OIDC_CLIENT_ID")?,
+            client_secret: require("GAMECODE_AUTH_OIDC_CLIENT_SECRET")?,
+            redirect_uri: require("GAMECODE_AUTH_OIDC_REDIRECT_URI")?,
+            scopes: require("GAMECODE_AUTH_OIDC_SCOPES")?,
         };
+        let session_key = decode_session_key(&require("GAMECODE_AUTH_SESSION_KEY")?)?;
 
         let ollama_enabled = parse_env("GAMECODE_OLLAMA_ENABLED", true);
         let ollama = if ollama_enabled {
@@ -80,30 +77,25 @@ impl Config {
                     .unwrap_or_else(|_| "dist".to_string()),
                 max_request_size: parse_env("GAMECODE_SERVER_MAX_REQUEST_SIZE", 10 * 1024 * 1024),
             },
-            auth: AuthConfig {
-                password_hash,
-                jwt_secret,
-                session_duration_hours: parse_env("GAMECODE_AUTH_SESSION_DURATION_HOURS", 24u64),
-            },
+            auth: AuthConfig { oidc, session_key },
             providers: ProvidersConfig { ollama },
         })
     }
 }
 
-fn hash_password(plaintext: &str) -> Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(plaintext.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| anyhow!("failed to hash password: {e}"))
+fn require(key: &str) -> Result<String> {
+    match env::var(key) {
+        Ok(v) if !v.is_empty() => Ok(v),
+        _ => Err(anyhow!("{key} must be set")),
+    }
 }
 
-fn generate_random_secret(len: usize) -> String {
-    rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(len)
-        .map(char::from)
-        .collect()
+fn decode_session_key(encoded: &str) -> Result<[u8; 32]> {
+    let raw = B64
+        .decode(encoded.trim())
+        .context("GAMECODE_AUTH_SESSION_KEY must be base64")?;
+    <[u8; 32]>::try_from(raw.as_slice())
+        .map_err(|_| anyhow!("GAMECODE_AUTH_SESSION_KEY must decode to exactly 32 bytes"))
 }
 
 fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {

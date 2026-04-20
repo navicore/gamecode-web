@@ -1,29 +1,58 @@
+use anyhow::anyhow;
 use axum::{
-    extract::State,
-    response::{sse::Event, Sse},
+    extract::{Query, State},
+    http::{
+        header::{COOKIE, SET_COOKIE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
+    middleware,
+    response::{sse::Event, AppendHeaders, IntoResponse, Redirect, Response, Sse},
     routing::{get, post},
     Json, Router,
 };
+use cookie::Cookie;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
-    auth::{generate_token, verify_password, AuthRequest, AuthResponse, AuthUser},
+    auth::{
+        auth_middleware, clear_session_cookie, clear_tx_cookie,
+        oidc::{pkce_challenge, random_b64_url},
+        session::{open, seal},
+        session_cookie, tx_cookie, AuthUser, SessionPayload, TxPayload, SESSION_COOKIE, TX_COOKIE,
+    },
     error::AppError,
     providers::ChatRequest,
     AppState,
 };
 use std::fs;
 
-pub fn routes() -> Router<Arc<AppState>> {
-    Router::new()
+pub fn routes(state: Arc<AppState>) -> Router {
+    let public = Router::new()
         .route("/health", get(health))
-        .route("/auth", post(authenticate))
+        .route("/auth/login", get(auth_login))
+        .route("/auth/callback", get(auth_callback))
+        .route("/auth/logout", post(auth_logout))
+        .with_state(state.clone());
+
+    let protected = Router::new()
+        .route("/me", get(me))
         .route("/providers", get(list_providers))
         .route("/prompts", get(list_prompts))
         .route("/chat", post(chat))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+        .with_state(state);
+
+    public.merge(protected)
 }
 
 #[derive(Serialize)]
@@ -40,7 +69,6 @@ struct ProviderStatus {
 
 async fn health(State(state): State<Arc<AppState>>) -> Result<Json<HealthResponse>, AppError> {
     let mut providers = Vec::new();
-
     for provider_name in state.providers.list_available() {
         if let Some(provider) = state.providers.get(&provider_name) {
             providers.push(ProviderStatus {
@@ -49,34 +77,116 @@ async fn health(State(state): State<Arc<AppState>>) -> Result<Json<HealthRespons
             });
         }
     }
-
     Ok(Json(HealthResponse {
         status: "ok".to_string(),
         providers,
     }))
 }
 
-async fn authenticate(
+async fn auth_login(State(state): State<Arc<AppState>>) -> Result<Response, AppError> {
+    let code_verifier = random_b64_url(32);
+    let code_challenge = pkce_challenge(&code_verifier);
+    let state_tok = random_b64_url(16);
+    let nonce = random_b64_url(16);
+
+    let tx = TxPayload {
+        code_verifier,
+        state: state_tok.clone(),
+        nonce: nonce.clone(),
+    };
+    let sealed = seal(&state.config.auth.session_key, TX_COOKIE.as_bytes(), &tx)?;
+    let url = state
+        .oidc
+        .authorize_url(&state_tok, &code_challenge, &nonce);
+
+    let cookie = header_value(&tx_cookie(sealed).to_string())?;
+    Ok((AppendHeaders([(SET_COOKIE, cookie)]), Redirect::to(&url)).into_response())
+}
+
+#[derive(Deserialize)]
+struct CallbackQuery {
+    code: String,
+    state: String,
+}
+
+async fn auth_callback(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AuthRequest>,
-) -> Result<Json<AuthResponse>, AppError> {
-    // Debug log
-    tracing::info!("Auth attempt with password length: {}", req.password.len());
-    tracing::debug!("Expected hash: {}", &state.config.auth.password_hash);
+    headers: HeaderMap,
+    Query(q): Query<CallbackQuery>,
+) -> Result<Response, AppError> {
+    let sealed = read_cookie(&headers, TX_COOKIE)
+        .ok_or_else(|| AppError::BadRequest("missing tx cookie".into()))?;
+    let tx: TxPayload = open(
+        &state.config.auth.session_key,
+        TX_COOKIE.as_bytes(),
+        &sealed,
+    )
+    .map_err(|_| AppError::BadRequest("invalid tx cookie".into()))?;
+    if !ct_eq(tx.state.as_bytes(), q.state.as_bytes()) {
+        return Err(AppError::BadRequest("state mismatch".into()));
+    }
 
-    // Verify password
-    verify_password(&req.password, &state.config.auth.password_hash).map_err(|e| {
-        tracing::warn!("Password verification failed: {:?}", e);
-        AppError::Unauthorized
-    })?;
+    let tokens = state
+        .oidc
+        .exchange_code(&q.code, &tx.code_verifier)
+        .await
+        .map_err(AppError::Internal)?;
+    let id_token = tokens
+        .id_token
+        .as_deref()
+        .ok_or_else(|| AppError::Internal(anyhow!("token response missing id_token")))?;
+    let claims = state
+        .oidc
+        .validate_id_token(id_token, &tx.nonce)
+        .await
+        .map_err(AppError::Internal)?;
 
-    // Generate token
-    let token = generate_token(&state.config.auth)?;
+    let username = claims
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| claims.sub.clone());
+    let session = SessionPayload {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        access_exp: now_secs() + tokens.expires_in,
+        username,
+        sub: claims.sub,
+    };
+    let sealed_session = seal(
+        &state.config.auth.session_key,
+        SESSION_COOKIE.as_bytes(),
+        &session,
+    )?;
 
-    Ok(Json(AuthResponse {
-        token,
-        expires_in: state.config.auth.session_duration_hours * 3600,
-    }))
+    let session_h = header_value(&session_cookie(sealed_session).to_string())?;
+    let clear_tx_h = header_value(&clear_tx_cookie().to_string())?;
+    Ok((
+        AppendHeaders([(SET_COOKIE, session_h), (SET_COOKIE, clear_tx_h)]),
+        Redirect::to("/"),
+    )
+        .into_response())
+}
+
+async fn auth_logout() -> Result<Response, AppError> {
+    let cleared = header_value(&clear_session_cookie().to_string())?;
+    Ok((
+        StatusCode::NO_CONTENT,
+        AppendHeaders([(SET_COOKIE, cleared)]),
+    )
+        .into_response())
+}
+
+#[derive(Serialize)]
+struct MeResponse {
+    username: String,
+    sub: String,
+}
+
+async fn me(auth: AuthUser) -> Json<MeResponse> {
+    Json(MeResponse {
+        username: auth.username,
+        sub: auth.sub,
+    })
 }
 
 #[derive(Serialize)]
@@ -95,7 +205,6 @@ async fn list_providers(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ProvidersResponse>, AppError> {
     let mut providers = Vec::new();
-
     for provider_name in state.providers.list_available() {
         if let Some(provider) = state.providers.get(&provider_name) {
             if let Ok(models) = provider.list_models().await {
@@ -106,7 +215,6 @@ async fn list_providers(
             }
         }
     }
-
     Ok(Json(ProvidersResponse { providers }))
 }
 
@@ -126,8 +234,6 @@ async fn list_prompts(
     _auth: AuthUser,
     State(_state): State<Arc<AppState>>,
 ) -> Result<Json<PromptsResponse>, AppError> {
-    // Try to load prompts from config file
-    // Check both service location and local location
     let prompts_paths = vec![
         "/usr/local/etc/gamecode-web/prompts.toml",
         "config/prompts.toml",
@@ -138,7 +244,6 @@ async fn list_prompts(
         if let Ok(content) = fs::read_to_string(path) {
             tracing::info!("Loading prompts from: {}", path);
 
-            // Parse TOML
             #[derive(Deserialize)]
             struct PromptsConfig {
                 prompts: Vec<SystemPrompt>,
@@ -211,21 +316,17 @@ async fn chat(
     tracing::info!("Messages: {:?}", req.messages);
 
     let mut stream = state.providers.chat(&req.provider, chat_request).await?;
-
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // Spawn task to convert provider stream to SSE events
     tokio::spawn(async move {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(chunk) => {
                     let event =
                         Event::default().data(serde_json::to_string(&chunk).unwrap_or_default());
-
                     if tx.send(Ok(event)).is_err() {
                         break;
                     }
-
                     if chunk.done {
                         break;
                     }
@@ -237,7 +338,6 @@ async fn chat(
                         }))
                         .unwrap_or_default(),
                     );
-
                     let _ = tx.send(Ok(error_event));
                     break;
                 }
@@ -246,4 +346,38 @@ async fn chat(
     });
 
     Ok(Sse::new(UnboundedReceiverStream::new(rx)))
+}
+
+fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    for header in headers.get_all(COOKIE).iter() {
+        let Ok(text) = header.to_str() else { continue };
+        for cookie in Cookie::split_parse(text).flatten() {
+            if cookie.name() == name {
+                return Some(cookie.value().to_string());
+            }
+        }
+    }
+    None
+}
+
+fn header_value(s: &str) -> Result<HeaderValue, AppError> {
+    HeaderValue::from_str(s).map_err(|_| AppError::Internal(anyhow!("bad header value")))
+}
+
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }

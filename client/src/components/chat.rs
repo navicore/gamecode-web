@@ -17,78 +17,6 @@ use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-fn user_name_from_token(token: &str) -> String {
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return "friend".into();
-    }
-    let payload_b64 = parts[1];
-    let padded = match payload_b64.len() % 4 {
-        0 => payload_b64.to_string(),
-        r => format!("{}{}", payload_b64, "=".repeat(4 - r)),
-    };
-    let bytes = match base64_url_decode(&padded) {
-        Some(b) => b,
-        None => return "friend".into(),
-    };
-    let s = match std::str::from_utf8(&bytes) {
-        Ok(s) => s,
-        Err(_) => return "friend".into(),
-    };
-    serde_json::from_str::<serde_json::Value>(s)
-        .ok()
-        .and_then(|v| v.get("sub").and_then(|x| x.as_str()).map(|x| x.to_string()))
-        .unwrap_or_else(|| "friend".into())
-}
-
-fn base64_url_decode(s: &str) -> Option<Vec<u8>> {
-    let std = s.replace('-', "+").replace('_', "/");
-    base64_decode(&std)
-}
-
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
-    const TBL: [i8; 128] = {
-        let mut t = [-1i8; 128];
-        let mut i = 0u8;
-        while i < 26 {
-            t[(b'A' + i) as usize] = i as i8;
-            t[(b'a' + i) as usize] = (i + 26) as i8;
-            i += 1;
-        }
-        let mut j = 0u8;
-        while j < 10 {
-            t[(b'0' + j) as usize] = (j + 52) as i8;
-            j += 1;
-        }
-        t[b'+' as usize] = 62;
-        t[b'/' as usize] = 63;
-        t
-    };
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
-    let bytes = s.as_bytes();
-    let mut buf: u32 = 0;
-    let mut bits = 0u32;
-    for &b in bytes {
-        if b == b'=' {
-            break;
-        }
-        if (b as usize) >= TBL.len() {
-            return None;
-        }
-        let v = TBL[b as usize];
-        if v < 0 {
-            return None;
-        }
-        buf = (buf << 6) | (v as u32);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(((buf >> bits) & 0xFF) as u8);
-        }
-    }
-    Some(out)
-}
-
 fn read_local(key: &str) -> Option<String> {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
@@ -102,13 +30,11 @@ fn write_local(key: &str, value: &str) {
 }
 
 #[component]
-pub fn Chat<F, G>(token: String, on_auth_error: F, on_logout: G) -> impl IntoView
+pub fn Chat<F, G>(user_name: Signal<String>, on_auth_error: F, on_logout: G) -> impl IntoView
 where
     F: Fn() + Clone + 'static,
     G: Fn() + Clone + 'static,
 {
-    let user_label = user_name_from_token(&token);
-    let token = create_rw_signal(token);
     let (notebook, set_notebook) = create_signal(Notebook::new());
     let (auth_error_triggered, set_auth_error_triggered) = create_signal(false);
 
@@ -196,10 +122,9 @@ where
 
     // Load providers and prompts on mount
     create_effect(move |_| {
-        let tk = token.get();
         spawn_local(async move {
             let client = ApiClient::new();
-            match client.list_providers(&tk).await {
+            match client.list_providers().await {
                 Ok(resp) => {
                     let list = resp.providers;
                     providers.set(list.clone());
@@ -223,7 +148,7 @@ where
                     web_sys::console::error_1(&format!("providers: {}", e).into());
                 }
             }
-            match client.list_prompts(&tk).await {
+            match client.list_prompts().await {
                 Ok(resp) => system_prompts.set(resp.prompts),
                 Err(crate::api::ApiError::Unauthorized) => set_auth_error_triggered.set(true),
                 Err(e) => {
@@ -375,7 +300,6 @@ where
             };
 
             set_is_streaming.set(true);
-            let tk = token.get_untracked();
             let provider = selected_provider.get_untracked();
             let model = selected_model.get_untracked();
             let prompt_name = selected_prompt_name.get_untracked();
@@ -392,7 +316,6 @@ where
             let cm_clone = context_manager.clone();
             spawn_local(async move {
                 stream_response(
-                    tk,
                     provider,
                     model,
                     system_prompt,
@@ -419,10 +342,7 @@ where
     });
 
     let provider_online = Signal::derive(move || !providers.get().is_empty());
-    let user_signal = Signal::derive({
-        let label = user_label.clone();
-        move || label.clone()
-    });
+    let user_signal = user_name;
 
     let simple_storage_new = simple_storage.clone();
     let cm_for_new = context_manager.clone();
@@ -491,11 +411,14 @@ where
         input_value.set(text);
     });
 
-    let user_initial = user_label
-        .chars()
-        .next()
-        .map(|c| c.to_ascii_uppercase().to_string())
-        .unwrap_or_else(|| "U".into());
+    let user_initial = Signal::derive(move || {
+        user_name
+            .get()
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_uppercase().to_string())
+            .unwrap_or_else(|| "U".into())
+    });
 
     let cm_for_composer = context_manager.clone();
 
@@ -557,7 +480,6 @@ where
                             />
                         }.into_view()
                     } else {
-                        let initial_for_each = user_initial.clone();
                         view! {
                             <div class="thread">
                                 <For
@@ -565,7 +487,7 @@ where
                                     key=|c| c.id.0
                                     children=move |cell| {
                                         let ctx = CellContext {
-                                            user_initial: initial_for_each.clone(),
+                                            user_initial: user_initial.get_untracked(),
                                             persona_name: selected_prompt_name.get_untracked(),
                                         };
                                         view! { <CellView cell=cell ctx=ctx notebook=notebook/> }
@@ -589,7 +511,6 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn stream_response(
-    token: String,
     provider: String,
     model: String,
     system_prompt: Option<String>,
@@ -648,9 +569,6 @@ async fn stream_response(
         opts.set_method("POST");
         let headers = Headers::new().unwrap();
         headers.append("Content-Type", "application/json").unwrap();
-        headers
-            .append("Authorization", &format!("Bearer {}", token))
-            .unwrap();
         opts.set_headers(&headers);
         let body = serde_json::to_string(&req).unwrap();
         opts.set_body(&wasm_bindgen::JsValue::from_str(&body));
