@@ -1,3 +1,8 @@
+<!-- ghmig:moved -->
+> **This repository has moved to [https://git.navicore.tech/navicore/gamecode-web](https://git.navicore.tech/navicore/gamecode-web).**
+>
+> The GitHub copy is archived and no longer maintained.
+
 # GameCode Web
 
 A secure web chat interface for AI models, starting with local Ollama integration.
